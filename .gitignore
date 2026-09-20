@@ -1,0 +1,11 @@
+# Credentials. Never commit.
+.env
+.env.*
+!.env.example
+
+# Saved API responses. May contain customer data from a shared book.
+out/
+
+__pycache__/
+*.pyc
+.venv/

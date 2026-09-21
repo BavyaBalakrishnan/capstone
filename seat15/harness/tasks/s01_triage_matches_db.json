@@ -1,0 +1,11 @@
+{
+  "id": "s01_triage_matches_db",
+  "kind": "solvable",
+  "note": "Written with Claude (AI-assisted) from live data observed 2026-09-21. Harness task, not a hand-written test.",
+  "instances": ["suryodaya", "keystone"],
+  "mode": "read_only",
+  "prompt": "Triage the oldest ticket still in status new: tell me its type and priority.",
+  "verifier": "seat15.harness.verifiers.seat15:triage_matches_db",
+  "checks": "Filed type and priority equal the ticket row, re-read at scoring time.",
+  "source": "control task"
+}

@@ -6,6 +6,10 @@
 # Saved API responses. May contain customer data from a shared book.
 out/
 
+# Harness run evidence. Traces and results quote ticket subjects and party names
+# from books other teams share. Summaries go in proofs/, raw runs stay local.
+runs/
+
 __pycache__/
 *.pyc
 .venv/

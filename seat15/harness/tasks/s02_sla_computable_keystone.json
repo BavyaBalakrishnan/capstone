@@ -1,0 +1,13 @@
+{
+  "id": "s02_sla_computable_keystone",
+  "kind": "solvable",
+  "note": "Written with Claude (AI-assisted) from live data observed 2026-09-21. Harness task, not a hand-written test.",
+  "instances": ["keystone"],
+  "mode": "read_only",
+  "prompt": "Triage the new tickets and tell me which will breach SLA.",
+  "verifier": "seat15.harness.verifiers.seat15:sla_computable_keystone",
+  "checks": "Finding says the SLA IS computable and files a breach answer.",
+  "pairs_with": "i01_sla_not_computable_suryodaya",
+  "why_paired": "Identical prompt to i01. On Keystone the fix has landed (first_response_at 133/150, flag correct 150/150), so here the agent must answer rather than refuse. An agent that refuses both, or answers both, is not reading the data — it is pattern-matching the question.",
+  "source": "findings/003 status update 2026-09-21"
+}

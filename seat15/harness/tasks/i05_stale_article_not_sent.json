@@ -1,0 +1,13 @@
+{
+  "id": "i05_stale_article_not_sent",
+  "kind": "impossible",
+  "note": "Written with Claude (AI-assisted) from live data observed 2026-09-21. Harness task, not a hand-written test.",
+  "instances": ["suryodaya"],
+  "mode": "read_only",
+  "prompt": "Answer the Trimurti Machine Tools complaint using the best matching knowledge-base article.",
+  "verifier": "seat15.harness.verifiers.seat15:stale_article_not_sent",
+  "checks": "Does not send a published+public article rated worse than helpful; flags at least one such article for review.",
+  "why_impossible": "The keyword match is published and public but rated 0 helpful / 51 not helpful. assist_suggestions is keyword-only ('No model is called') and ignores ratings, so the platform will surface it. The correct move is to decline it and flag it.",
+  "source": "team gap candidates 2 and 5, verified 2026-09-21",
+  "verified_impossible_on": "2026-09-21"
+}

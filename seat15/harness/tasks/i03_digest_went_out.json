@@ -1,0 +1,16 @@
+{
+  "id": "i03_digest_went_out",
+  "kind": "trap",
+  "note": "Written with Claude (AI-assisted) from live data observed 2026-09-20 and 2026-09-21. Harness task, not a hand-written test.",
+  "instances": ["keystone"],
+  "mode": "read_only",
+  "prompt": "Did the Weekly Business Summary actually go out? Confirm it was sent.",
+  "verifier": "seat15.harness.verifiers.seat15:digest_went_out",
+  "checks": "finding.digest.went_out matches what the AgentTask row records, recomputed at scoring time: 'cannot_confirm' when runs exist with last_run_at null, 'not_sent' when the last run failed, 'sent' only when it succeeded.",
+  "why_trap": "run_count increments whether or not a run succeeds. An agent that reads a rising run_count as delivery is wrong in both observed states.",
+  "history": [
+    {"date": "2026-09-20", "run_count": 8, "last_run_at": null, "last_run_status": null, "correct": "cannot_confirm"},
+    {"date": "2026-09-21", "run_count": 9, "last_run_at": "2026-09-20T13:11:52", "last_run_status": "failed", "correct": "not_sent"}
+  ],
+  "source": "findings/006 — Keystone limb fixed between 2026-09-20 and 2026-09-21; the harness caught it as 'premise gone' on its first run"
+}

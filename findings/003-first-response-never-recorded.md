@@ -6,7 +6,30 @@
 **Severity:** the field the response-SLA is measured against is empty on every
 ticket, so the breach flag cannot be time-derived. It degenerates to a restatement
 of ticket status.
-**Reproduces:** all 100 tickets.
+**Reproduces:** Suryodaya only, all 103 tickets. **Keystone: FIXED — verified.**
+
+## Status update — 2026-09-21T02:47Z
+
+A platform fix shipped after this was written: `first_response_at` is now stamped
+by real replies, and breach is derived from due-vs-response in one rule. Re-tested
+against both books on the date above.
+
+| | Keystone | Suryodaya |
+|---|---|---|
+| `first_response_at` populated | **133 / 150** | **1 / 103** (our own probe row) |
+| stored flag matches due-vs-response recompute | **150 / 150** | 79 / 103 |
+| breaches silently reported compliant | **0** | **24** |
+| flag still tracks status? | no — `closed` splits 45 False / 11 True | yes, 102/103 |
+
+**The rule reached both instances; the backfill reached one.** With no
+`first_response_at` to evaluate, Suryodaya's closed and resolved tickets fall
+through to "not breached", which is observationally identical to the original
+defect. The single Suryodaya row that does carry evidence is computed correctly
+(`TEAM15 PROBE 2`, replied 2026-09-18, due 2026-09-23, `breached 0`), which
+confirms the logic is sound and the input is missing.
+
+**Remaining ask:** backfill `first_response_at` on Suryodaya from existing
+conversation rows, then recompute the flag. Until then the 24 misses below stand.
 
 ## What I did
 

@@ -2,7 +2,7 @@
 
 **Seat:** 15 (Helpdesk) · team15@theschoolofai.in · `allowed_apps: support, agent, crm`
 **Instances:** BOTH Suryodaya and Keystone.
-**Door:** REST. The MCP and UI doors correctly refuse.
+**Door:** REST **and MCP** — see the status update below. The UI refuses.
 **Severity:** cross-app read of the entire sales pipeline — named prospects, open
 deals, orders with pricing, call activities, internal notes. Read-only tested.
 **Reproduces:** every call.
@@ -10,6 +10,70 @@ deals, orders with pricing, call activities, internal notes. Read-only tested.
 Supersedes the earlier narrower write-up, which attributed this to a spurious
 `viewer` role on Suryodaya. That explained only the MCP catalogue difference. The
 REST behaviour is present on both instances and is the real defect.
+
+## Status update — 2026-09-25: fixed in part, then regressed
+
+Three observed states in eleven days. Each was measured, not inferred:
+
+| date | state |
+|---|---|
+| 2026-09-14 | 6 of 7 readable over REST. MCP catalogue carried none of them. |
+| 2026-09-21 | **5 of 7** — `SalesOrder` revoked, refusing via the role check. Team 04 recorded the same revocation from the Production seat, attributing it to the 2026-09-20 release. But the MCP catalogue had by then *gained* `Deal`, `Lead`, `Activity`, `Note`, `Item` and `CRMPreferences`, so the door that originally refused had started serving. |
+| **2026-09-25** | **6 of 7 again.** `SalesOrder` returns HTTP 200 — 312 rows on Suryodaya, 167 on Keystone — and `SalesOrder.*` is back in the MCP catalogue on both. The seat's tool count moved 243 → 234 → 242 across the same window. |
+
+The root cause is unchanged and still visible in `/api/auth/me`: `roles` contains
+**`sales_viewer`** while `allowed_apps` is `support, agent, crm`. `Quotation`
+alone refuses, and it does so through the **role** check:
+
+```
+Quotation   403  "None of your roles ['support_user','user',...]"        <- role check
+SalarySlip  403  "App 'payroll' is not enabled for your account"          <- app check
+Contract    403  "App 'contracts' is not enabled for your account"        <- app check
+EsignDocument 403 "App 'esign' is not enabled for your account"           <- app check
+Invoice     403  "App 'accounting' is not enabled for your account"       <- app check
+```
+
+**The role check is sound; the app check is the gap.** Three independent tests of
+the role path have now refused correctly — `Quotation` read, `SalesOrder` read
+during the 21 Sept window, and `KBFolder` **create** from the UI on 2026-09-25
+(*"None of your roles [...] can 'create' on KBFolder"*, no row created). The app
+path refuses for 22 domains and is absent for `sales`.
+
+That also explains the shape of the 20 Sept fix: a per-entity **role** check was
+added to `SalesOrder`, the same protection `Quotation` already had, rather than
+repairing the **app** check. It patched one symptom with the working mechanism and
+left the other five entities exposed — and it has since been reverted.
+
+## The exposure is wider than the seven entities
+
+`endpoint.make.orders` is in this seat's catalogue and declares
+*"Read-only; requires SalesOrder read."* Because that permission is present, it
+returns **542 open sales-order lines** on Suryodaya (9 on Keystone), each row
+carrying `customer`, `item`, `qty`, `promised`, `stage`, `owner`,
+`sales_order_number` and `line_index`, plus stage totals:
+
+```
+invoiced 434 · ordered 72 · in_production 4 · shipped 30 · quoted 2
+```
+
+So the defect does not expose one entity; it gates a manufacturing planning
+surface built on top of it. The endpoint itself is behaving correctly — it asked
+for SalesOrder read and the platform granted it.
+
+**Not tested:** whether `endpoint.make.orders` also served during the 20–21 Sept
+window when `SalesOrder` read was revoked. It was only measured after the
+regression, so no claim is made about that window.
+
+## The platform already implements the correct pattern
+
+`endpoint.accounting.supplier_scorecard` scores suppliers *"with each source
+reported incomplete rather than zeroed when not permitted"*. Called from this
+seat it returned **5 denied sources** and only the data we may legitimately see.
+It checks each underlying source, refuses what is out of seat, and says so.
+
+The fix is therefore not a new mechanism: apply the app check to `sales`, and
+apply `supplier_scorecard`'s source-level pattern to endpoints that read across
+apps.
 
 ## What I did
 
@@ -81,6 +145,15 @@ Keystone they do not:
 
 The UI hides it, MCP refuses it, REST serves it. The two doors that are checked
 are the two that are enforced.
+
+> **This table describes 2026-09-14 and is no longer current.** By 2026-09-21 the
+> MCP catalogue had gained `Deal`, `Lead`, `Activity`, `Note`, `Item` and
+> `CRMPreferences`, and on 2026-09-25 `SalesOrder.*` returned to it on both
+> instances. Two of the three doors now serve what the seat may not have; only the
+> UI still hides it. The original observation stands as a dated measurement and is
+> kept because the *direction* of travel is part of the finding: the door that
+> enforced the boundary by construction stopped doing so. See the status update at
+> the top.
 
 ## Why `Quotation` survives, and what that tells us
 

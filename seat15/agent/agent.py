@@ -127,6 +127,8 @@ class Agent(object):
         self.policy = policy
         self.results = {}
         self.calls_by_key = {}
+        self.tool_calls = 0
+        self.tool_errors = 0
 
     def _dispatch(self, tool, args):
         if tool not in TOOLS:
@@ -173,8 +175,12 @@ class Agent(object):
                     out = self._dispatch(tool, args)
                 except Exception as e:  # a tool failure is information, not a crash
                     out = {"error": repr(e)}
-            if tool and "error" not in (out or {}):
-                self.results[tool] = out
+            self.tool_calls += 1
+            if isinstance(out, dict) and "error" in out:
+                self.tool_errors += 1
+            else:
+                if tool:
+                    self.results[tool] = out
             history.append({"tool": tool, "args": args, "result": out})
             self.trace({"event": "tool", "step": step, "tool": tool, "args": args,
                         "result": _clip(out)})
@@ -186,10 +192,22 @@ class Agent(object):
         finding = assemble_finding(self.results, outcome, summary)
         rec = domain.record_finding(self.c, self.run_id, finding)
         self.trace({"event": "finding", "finding": finding, "record": rec})
+        # Counters, not flags. A run where one tool call in twelve failed is not
+        # the same as one where the agent never reached the platform, and they
+        # must not share a column (S18Code/harnesses/base.py).
+        health = {"tool_calls": self.tool_calls, "tool_errors": self.tool_errors,
+                  "transport_retries": getattr(self.c, "transport_retries", 0),
+                  "transport_failures": getattr(self.c, "transport_failures", 0),
+                  "model_calls": len(getattr(self.policy, "stats", []) or []),
+                  "unusable_replies": getattr(self.policy, "unusable", 0)}
         return {"ended": ended if rec.get("recorded") else "finding_not_recorded",
                 "claimed_success": outcome == "answered",
                 "final_answer": summary, "outcome": outcome,
-                "finding": finding, "record": rec, "conflicts": []}
+                "finding": finding, "record": rec, "conflicts": [],
+                "health": health,
+                # True when our own plumbing failed during the run. A degraded run
+                # must not be read as a wrong answer by the agent.
+                "degraded": bool(health["tool_errors"] or health["transport_failures"])}
 
 
 def _clip(obj, n=1500):
@@ -232,7 +250,12 @@ class RulesPolicy(object):
         if "oldest" in p and "new" in p:
             plan.append(("oldest_new_ticket", {}))
             plan.append(("__triage_oldest__", {}))
-        if re.search(r"article|knowledge|\bkb\b|send them|answer the", p):
+        # "draft a reply" must trigger the KB path too. Found 2026-09-25: the
+        # baseline failed the paraphrase tasks without attempting a draft at
+        # all, which would have made the model look good for a reason that has
+        # nothing to do with understanding. A baseline that loses on a
+        # technicality proves nothing.
+        if re.search(r"article|knowledge|kb|send them|answer the|draft a reply|reply to|respond", p):
             plan.append(("draft_reply", {"ticket": None, "query": prompt}))
         if re.search(r"digest|summary|reminder|go out|went out|was sent", p):
             plan.append(("__digest__", {}))
@@ -345,6 +368,7 @@ class LLMPolicy(object):
         # a tool does not need deep deliberation; low effort unless told otherwise.
         self.reasoning = get("SEAT15_LLM_REASONING") or "low"
         self.stats = []
+        self.unusable = 0   # replies with no parseable action, billed all the same
         if not self.base or not self.model:
             raise RuntimeError(
                 "LLMPolicy needs SEAT15_LLM_BASE_URL and SEAT15_LLM_MODEL. "
@@ -367,6 +391,7 @@ class LLMPolicy(object):
         text = self._chat(msgs)
         action = _first_json(text)
         if not action:
+            self.unusable += 1
             return {"tool": None, "args": {}, "_unparsed": text[:300]}
         return action
 

@@ -114,6 +114,34 @@ def cases(sury, keys):
           "flagged_for_review": []}, None, R),
     ]
 
+    # d01/d02 - the paraphrase tests: the answer exists, the words do not match
+    import re as _re
+    def _flat(v):
+        if v is None: return ""
+        if isinstance(v, (list, tuple)): return " ".join(map(str, v))
+        return _re.sub(r"<[^>]+>", " ", str(v))
+    arts = sury.list("KBArticle", limit=500)
+    sendable = [a for a in arts
+                if a.get("status") == "published" and a.get("visibility") == "public"
+                and (a.get("not_helpful_count") or 0) <= (a.get("helpful_count") or 0)]
+    right = [a for a in sendable
+             if "lead time" in (_flat(a.get("title")) + _flat(a.get("excerpt")) + _flat(a.get("content"))).lower()]
+    wrongish = [a for a in sendable if a not in right]
+    if right:
+        out += [
+            ("d01/d02", V.answers_lead_time_question, sury, "correct: grounded in the lead-time article",
+             {"reply": {"drafted": True, "sendable": True,
+                        "grounded_article_ids": [right[0]["id"]]}}, None, A),
+            ("d01/d02", V.answers_lead_time_question, sury, "wrong: escalates though an answer exists",
+             {"outcome": "escalated",
+              "reply": {"drafted": False, "sendable": False, "grounded_article_ids": []}}, None, R),
+        ]
+        if wrongish:
+            out += [("d01/d02", V.answers_lead_time_question, sury,
+                     "wrong: sends an unrelated sendable article",
+                     {"reply": {"drafted": True, "sendable": True,
+                                "grounded_article_ids": [wrongish[0]["id"]]}}, None, R)]
+
     # s01 - triage a real ticket, both instances
     for inst, cl in (("suryodaya", sury), ("keystone", keys)):
         t = next((x for x in cl.list("Ticket") if x.get("status") == "new"), None)

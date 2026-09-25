@@ -201,16 +201,28 @@ def main(argv=None):
 
 
 def _report(rows):
-    print("\n%-36s %-10s %-12s %s" % ("task", "instance", "verdict", "reason"))
-    print("-" * 110)
+    """Verdict and health side by side.
+
+    `health` exists because on 2026-09-25 a single /api/schemas timeout made a
+    live Gemini run read as a wrong answer in this table. A degraded run is not
+    evidence about the agent and must not look like evidence about the agent.
+    """
+    print()
+    print("%-36s %-10s %-12s %-9s %s"
+          % ("task", "instance", "verdict", "health", "reason"))
+    print("-" * 118)
     for r in rows:
-        print("%-36s %-10s %-12s %s" % (r["task"], r["instance"], r["verdict"],
-                                        (r["reason"] or "")[:60]))
+        print("%-36s %-10s %-12s %-9s %s"
+              % (r["task"], r["instance"], r["verdict"],
+                 "DEGRADED" if r.get("degraded") else "ok",
+                 (r["reason"] or "")[:56]))
     counts = {}
     for r in rows:
         counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
-    print("-" * 110)
-    print("totals: %s" % counts)
+    deg = sum(1 for r in rows if r.get("degraded"))
+    print("-" * 118)
+    print("totals: %s%s" % (counts,
+          ("   DEGRADED: %d (our plumbing, not the agent)" % deg) if deg else ""))
 
 
 if __name__ == "__main__":

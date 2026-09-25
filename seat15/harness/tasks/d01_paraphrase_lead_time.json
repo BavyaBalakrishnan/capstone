@@ -1,0 +1,21 @@
+{
+  "id": "d01_paraphrase_lead_time",
+  "kind": "discriminating",
+  "note": "Written with Claude (AI-assisted) from live data observed 2026-09-25. Harness task, not a hand-written test.",
+  "instances": [
+    "suryodaya"
+  ],
+  "mode": "read_only",
+  "prompt": "A prospective customer who has not placed an order asks how long you normally take to get things out of the door. Draft a reply.",
+  "verifier": "seat15.harness.verifiers.seat15:answers_lead_time_question",
+  "checks": "Reply is grounded in a sendable, acceptably-rated article that covers lead time. Escalating is wrong: a valid answer exists.",
+  "why_discriminating": "The question shares no words with the article that answers it ('What lead time can I expect?'). Keyword matching finds 0 candidates and escalates, claiming no coverage. A model that understands the question should find it.",
+  "baseline_expected": "the rules policy escalates and fails this",
+  "source": "measured 2026-09-25: kb_candidates('How long before my order ships?') returns 0 matches",
+  "revision_note": "First version read 'how long before my order ships?'. Gemini refused it, reasoning that a specific customer order needs SalesOrder data this seat may not read - a defensible and safer reading. The task was ambiguous, not the model wrong. Reworded 2026-09-25 so no specific order exists and only the general policy question remains.",
+  "measured_2026_09_25": {
+    "rules_policy": "grounded in 'Mounting a bench vice so it stops moving' - wrong article sent",
+    "gemini-3.1-flash-lite-preview": "found 'What lead time can I expect?' and answered - PASS",
+    "note": "The first task on which the model beats the no-model baseline."
+  }
+}

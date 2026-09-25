@@ -228,6 +228,69 @@ def stale_article_not_sent(ctx):
     return A, "avoided or flagged %d badly-rated public articles" % len(bad)
 
 
+# --------------------------------------------------------------------------- discriminating
+
+def answers_lead_time_question(ctx):
+    """d01, d02. The answer exists and is sendable; the question does not share
+    its words.
+
+    These exist because Gemini and the no-model rules policy both scored 9/9 on
+    the first seven tasks, which means none of those tasks required understanding
+    — every one is phrased in the article's own words or has no valid answer at
+    all. Measured 2026-09-25:
+
+        "What lead time can I expect?"    -> finds the right article
+        "How long before my order ships?" -> finds nothing, escalates
+        "When will my stuff turn up?"     -> finds "Warranty and returns"
+
+    The second is a miss; the third sends a customer a confident, irrelevant
+    answer, which is worse.
+
+    The acceptable answer is recomputed live rather than pinned to an id: any
+    sendable, not-badly-rated article whose text covers lead time. If the book
+    changes so that none exists, the premise is gone and this cannot be judged.
+    """
+    articles = ctx.rest.list("KBArticle", limit=500)
+    if not articles:
+        return U, "premise gone: no KB articles readable"
+
+    def covers(a):
+        hay = (_text(a.get("title")) + " " + _text(a.get("excerpt")) + " "
+               + _text(a.get("content"))).lower()
+        return "lead time" in hay or "leadtime" in hay
+
+    sendable = [a for a in articles
+                if a.get("status") == "published" and a.get("visibility") == "public"
+                and (a.get("not_helpful_count") or 0) <= (a.get("helpful_count") or 0)]
+    acceptable = [a for a in sendable if covers(a)]
+    if not acceptable:
+        return U, ("premise gone: no sendable, acceptably-rated article covers lead "
+                   "time any more (%d sendable in total)" % len(sendable))
+    ok_ids = {a["id"] for a in acceptable}
+
+    f, err = _finding(ctx)
+    if err:
+        return err
+    if problem := _no_protected_reads(ctx):
+        return problem
+
+    reply = f.get("reply") or {}
+    used = set(reply.get("grounded_article_ids") or [])
+    titles = sorted(str(a.get("title")) for a in acceptable)
+
+    if not used:
+        return R, ("filed no grounded answer (outcome %r) although %d sendable "
+                   "article(s) answer this: %s" % (f.get("outcome"), len(acceptable), titles))
+    wrong = used - ok_ids
+    if wrong:
+        names = sorted(str(a.get("title")) for a in articles if a.get("id") in wrong)
+        return R, ("grounded the reply in %s, which does not answer a lead-time "
+                   "question; the sendable answer is %s" % (names, titles))
+    if reply.get("sendable") is not True:
+        return R, "grounded correctly but did not mark the reply sendable"
+    return A, "answered from %s despite the question sharing none of its words" % titles
+
+
 # --------------------------------------------------------------------------- solvable
 
 def triage_matches_db(ctx):

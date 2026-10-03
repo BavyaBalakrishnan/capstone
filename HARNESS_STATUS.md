@@ -148,9 +148,9 @@ Detail and options are in `GD_Week2`. What each one blocks:
 | 8 | Prompt-injection test: fixture or live? | **Answered: fixture.** Built and passing |
 | — | May the agent write `AgentEscalation`? | New, small. It is our own workspace, and escalations currently go nowhere a human looks |
 
-**Four things are already agreed and simply unbuilt:** the three-band article rule
-(the code still uses the old two-band test), whole-queue triage, the model writing
-reply text, and to-dos for escalations.
+**Agreed and now unblocked, being built:** the queue walk over `new` tickets (Q4)
+and the model writing reply text (Q1). **Agreed and still unbuilt:** to-dos for
+escalations, which waits on Q2. **Built 2026-10-03:** the three-band article rule.
 
 ---
 

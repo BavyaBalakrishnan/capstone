@@ -1,6 +1,8 @@
 # Gap report — Seat 15, Helpdesk (`support`)
 
 **Team 15 · Suryodaya (India) + Keystone (US) · all figures measured read-only 2026-09-20**
+**Two figures have changed since: the tool count is now 227 (was 243) and finding 001
+was fixed at the root on 2026-10-03, except for `Item`. See `GAP_REPORT.md`.**
 **Product compared: [Plain](https://plain.com)** — AI-native B2B support; MCP server with full workflow
 writes, SLA modelled as thread state, Slack digests. Secondary: Intercom Fin, Pylon.
 Full evidence in [`GAP_REPORT.md`](GAP_REPORT.md); defects in [`findings/`](findings/).
@@ -76,7 +78,7 @@ and drives state. We are ahead of Intercom (14 tools, 3 writes, none touching th
 
 | # | What | Status |
 |---|---|---|
-| 001 | App boundary not enforced for `sales`: 6 of 7 entities readable from a Helpdesk seat on **both** instances. Cause: `roles` holds `sales_viewer`, `allowed_apps` omits `sales` | reproduces — **widened**, MCP now leaks too |
+| 001 | App boundary not enforced for `sales`: 6 of 7 entities readable from a Helpdesk seat on **both** instances. Cause: `roles` holds `sales_viewer`, `allowed_apps` omits `sales` | **FIXED at the root 2026-10-03** — `sales_viewer` removed; six of the seven now refuse. **`Item` still reads and writes** |
 | 002 | `Ticket.tags` a list against declared `text`; crashed 70/100 detail pages | **filed & fixed**, board S9 |
 | 003 | `first_response_at` unwritten; breach flag mirrored status | **fixed on Keystone** (133/150 stamped, 150/150 correct) — **still open on Suryodaya**: 1/103 stamped, 24 breaches silently reported compliant |
 | 006 | `AgentTask.last_run_status` = `queued` (not in schema, 15/96); 31 `cron` rows whose expression is a product name; Keystone's tasks report 30 runs with `last_run_at` null | **new** |

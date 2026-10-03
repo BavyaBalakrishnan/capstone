@@ -84,19 +84,23 @@ number. One of our checks fails it for exactly that.
 
 | Test | What it proves | Result |
 |---|---|---|
-| Do-nothing agent | a checker never passes an agent that did nothing | fails all 20 |
+| Do-nothing agent | a checker never passes an agent that did nothing | fails all 21 |
 | Checker self-test | checkers say yes to right answers, no to wrong ones, and catch cheats | 47 / 47 |
 | Hand-written unit tests | the small pieces behave as decided | 21 / 21 |
-| Fixed script (no AI) | the whole pipeline works end to end | 16 of 18 |
-| AI model (Gemini) | an AI can drive it | 17 of 18 |
+| Fixed script (no AI) | the whole pipeline works end to end | 17 of 19 |
+| AI model (Gemini) | an AI can drive it | 17 of 19 |
 
-Two of the 20 runs could not be judged at all, which is a result in its own
+Two of the 21 runs could not be judged at all, which is a result in its own
 right: the thing they were testing had been **fixed on the platform**, so the
 checker said *"premise gone"* instead of passing or failing. A run that cannot be
-judged never counts as a pass. That is why the totals above are out of 18.
+judged never counts as a pass. That is why the totals above are out of 19.
 
 The two the fixed script fails are the two that need real understanding — it is
-*supposed* to fail those. The one the AI fails is described in section 7.
+*supposed* to fail those. The two the AI fails are a different story: one is the
+finish-guard failure described in section 7, since fixed and re-measured at 3/3,
+and the other is a task that has passed and failed on different runs of the same
+preview model. **Single runs of a model are samples, not measurements** — which
+is why the harness takes `--repeat`.
 
 ## 5. The task that checks the whole job
 
@@ -199,6 +203,27 @@ our loop's responsibility.**
    loop does not hold it to finishing    0 / 3
    loop holds it to finishing            3 / 3
    ```
+
+   **And then the same guard failed, in a way worth more than the first result.**
+   On a later run it fired six times, the AI wrote two more replies, and then
+   got stuck: it reached for the wrong tool, spent thirteen steps going nowhere,
+   and still finished two replies short.
+
+   The guard was telling it *which* tickets were outstanding but **not which
+   article to use** — even though the agent's own triage had already chosen one
+   for each. We were demanding work while withholding the information needed to
+   do it. The guard now hands back the exact call to make:
+
+   ```
+   not done: 2 ticket(s) your own triage marked draftable still have no reply.
+   Call write_reply once for each, with the article your own triage already chose:
+     write_reply(ticket='TKT-2026-00108', article_id='125b2b4d', body=<your text>)
+     write_reply(ticket='TKT-2026-00148', article_id='891579f5', body=<your text>)
+   ```
+
+   That took it from **0/1 to 3/3**. The lesson is not "models are forgetful" —
+   it is that **a demand without the means to satisfy it is a trap**, and the
+   loop had the means all along.
 
 ### And a related one, found today
 

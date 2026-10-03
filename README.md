@@ -16,14 +16,16 @@ knowledge base, and tell me which will breach SLA."*
 | [`HARNESS_STATUS.md`](HARNESS_STATUS.md) | **Start here for the harness.** What it does, what it has caught, what is still open. Written for someone who has not seen the code. |
 | [`proofs/`](proofs/) | Sanitised run summaries and experiment results. Verdict reasons are stripped: they quote ticket subjects and article titles from books other teams share. |
 | [`GAP_REPORT.md`](GAP_REPORT.md) | Week-one deliverable. What commercial helpdesk products do that AgentSwitch does not, which gaps an agent can close with this seat's existing tools, and what an agent can do that those products cannot. |
-| [`findings/`](findings/) | Defects found while measuring the platform. One filed and fixed; four written up. |
+| [`findings/`](findings/) | Eight defects found while measuring the platform. One fixed at the root, two filed on the platform's own bug board, five written up. |
 | [`as.sh`](as.sh) | Shell helpers for logging in and calling MCP. Reads credentials from `.env`, so the password never reaches shell history. |
 | `.env.example` | Template. Copy to `.env`, which is gitignored. |
 
 ## Findings
 
-All re-tested **2026-09-20**. Two of the original five changed status on re-test;
-both are recorded rather than quietly dropped.
+Re-tested **2026-09-20**, and 001 re-tested again **2026-10-03** when a harness
+task reported *"premise gone"*. Three have changed status since first being
+written; every change is recorded rather than quietly dropped, because a defect
+report that silently updates itself cannot be audited.
 
 | | | Status |
 |---|---|---|
@@ -33,6 +35,8 @@ both are recorded rather than quietly dropped.
 | 004 | Agent dashboard reports $6,010,165 estimated cost against 19,100 tokens | written up — **not re-tested this pass** |
 | 005 | `reopen_count` holding values unreachable under the state machine (56 reopens on a ticket in `new`); `response_count` 48 against zero reply rows | **no longer reproduces** — max `reopen_count` is now 1, max `response_count` 1. Fixed or reseeded between passes. The `sender_type` limb was not re-tested |
 | 006 | `AgentTask.last_run_status` holds `queued`, a value its schema does not declare (15/96); 31 `cron` rows whose `cron_expression` is a product name; Keystone's two live tasks report 30 runs with `last_run_at` null | **new** — written up |
+| 007 | `KBArticle.helpful_count` and `not_helpful_count` are writable by any client that can update an article, and no entity records the individual votes behind them. The only quality signal an answering agent has cannot be audited | written up — **the write was deliberately not attempted**, so this is read from the schema rather than proven by abuse |
+| 008 | **An empty reply stamps `first_response_at` and counts as a response.** On `TKT-2026-00103` the first-response timestamp matches an empty-bodied reply to the microsecond. Response SLA can therefore be satisfied without answering anyone | **FILED 2026-10-03** — `BugReport` `0a7bf46b`. Proven from evidence already on the platform; no new write was made |
 
 ## Running it
 

@@ -220,14 +220,15 @@ Keystone shows none of 1–4, which is why the two books behave so differently.
 2. **`slug` holds part codes on 52 of 102 rows** — `DC5235/3738`, `MS4710/3736`.
    They contain `/`, which cannot appear in a URL slug at all. Only 23 slugs
    actually match their title.
-3. **`source_ticket_id` is set on 74 rows but points at only 9 distinct tickets.**
-   One ticket is the declared source of 14 articles, and only 9 of the 74 share
+3. **`source_ticket_id` is set on 75 rows but points at only 9 distinct tickets.**
+   One ticket is the declared source of 14 articles, and only 9 of the 75 share
    even one word with the ticket they point at. Treat it as noise, not provenance.
+   (74 when first measured on 2026-09-30; the book gained an article. See 7.)
 4. **`seo_title` names a different company than the title on 18 of 81 rows.**
 5. **The three counters are client-writable** and no vote record exists anywhere
    (`findings/007`). Ratings are the only quality signal available and cannot be
    verified.
-6. **Articles are short.** Median 20 words; 74 of 102 under 30 words. Even a
+6. **Articles are short.** Median 20 words; 75 of 102 under 30 words. Even a
    sendable article is often a stub.
 7. **Counts move.** 101 → 102 in a day. Never hardcode a total; recompute it.
 

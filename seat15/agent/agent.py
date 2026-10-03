@@ -54,9 +54,11 @@ def queue_request(prompt):
     return bool(re.search(QUEUE_WORDS, (prompt or "").lower()))
 
 
-FINISH_GUARD = ("not done: %d ticket(s) your own triage marked draftable still have "
-                "no reply - %s. Call write_reply for each, or re-triage if you now "
-                "think they should be escalated.")
+FINISH_GUARD = ("not done: %d ticket(s) your own triage marked draftable still "
+                "have no reply. Call write_reply once for each, with the article "
+                "your own triage already chose:%s" + chr(10) +
+                "If you now think one should be escalated instead, say so in "
+                "your summary and finish.")
 
 
 # --------------------------------------------------------------------------- tools
@@ -220,6 +222,13 @@ class Agent(object):
     def _unfinished_drafts(self, history):
         """Tickets the agent itself judged draftable and has not drafted.
 
+        Returns (ticket, article_id) pairs. The article id matters: measured
+        2026-10-03, a model told only WHICH tickets were outstanding reached for
+        `draft_reply` with the query "general inquiry" instead of `write_reply`,
+        then spent thirteen steps failing to finish two replies. The triage had
+        already chosen the article for each one; withholding it from the policy
+        made the loop demand work it was not giving the information to do.
+
         Its own triage decided these; the loop invents nothing. Disabled by
         SEAT15_NO_FINISH_GUARD so the grid can move exactly this one thing.
         """
@@ -227,7 +236,8 @@ class Agent(object):
             return []
         q = self.results.get("triage_queue") or {}
         written = {h["args"].get("ticket") for h in history if h["tool"] == "write_reply"}
-        return [r.get("ticket") for r in q.get("tickets", [])
+        return [(r.get("ticket"), (r.get("article") or {}).get("id"))
+                for r in q.get("tickets", [])
                 if r.get("decision") == "draft" and r.get("ticket") not in written]
 
     def _dispatch(self, tool, args):
@@ -289,10 +299,14 @@ class Agent(object):
                     # model's stamina. Only refused while the budget can still
                     # cover the remainder, so this can never cause a hang.
                     self.trace({"event": "unfinished", "step": step,
-                                "outstanding": unfinished})
+                                "outstanding": [t for t, _ in unfinished]})
+                    detail = "".join(
+                        chr(10) + "  write_reply(ticket=%r, article_id=%r, "
+                                  "body=<your text>)" % (t, a)
+                        for t, a in unfinished)
                     history.append({"tool": "__finish_guard__", "args": {},
                                     "result": {"error": FINISH_GUARD % (
-                                        len(unfinished), ", ".join(unfinished))}})
+                                        len(unfinished), detail)}})
                     continue
                 return self._finish(action.get("outcome", "answered"),
                                     action.get("summary", ""), "done")

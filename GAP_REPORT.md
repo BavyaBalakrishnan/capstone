@@ -3,6 +3,25 @@
 **Team 15 · team15@theschoolofai.in · Suryodaya (India) and Keystone (US)**
 **Week-one deliverable. All figures re-derived 2026-09-20.**
 
+> ### Read this first — what has changed since submission
+>
+> This document was submitted on **2026-09-20** and its figures are correct as
+> of that date. It is kept unedited as the dated artifact it is. Four things
+> have since changed, re-measured **2026-10-03**, and the numbers below should
+> be read with these corrections:
+>
+> | This report says | Now |
+> |---|---|
+> | `findings/001`: 6 of 7 sales entities readable from a Helpdesk seat | **Fixed at the root.** `sales_viewer` was removed from this seat's roles; Deal, Lead, Activity, Note, SalesOrder and Quotation all refuse with HTTP 403 on both instances. **`Item` is still readable** and is in the same app, so the boundary is not fully closed |
+> | 243 tools visible to this seat | **227.** The drop is the sales tools disappearing with the fix above |
+> | Suryodaya: 103 tickets, 100 articles, `first_response_at` on 1 of 103 | **105 tickets, 102 articles, stamped on 5 of 105.** The defect is unchanged; the book grew |
+> | Keystone: `first_response_at` on 133 of 150 | **Unchanged — still 133 of 150** |
+>
+> The point of the Method note below is that these books move. They did. We
+> found the `findings/001` fix not by re-reading the platform but because a
+> harness task reported *"premise gone: sales entities are no longer
+> readable"* — which is the behaviour the harness exists to produce.
+
 Every number on our side was re-pulled and recomputed on the submission date, not
 carried over from the first pass. That matters here: these books are shared with
 other teams, and between the first pass and this one the Suryodaya ticket count

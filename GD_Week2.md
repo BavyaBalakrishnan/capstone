@@ -151,6 +151,32 @@ harness must verify that a draft cites only a sendable, non-blocked article.
 
 ## 5. Open question 2 — how does work reach a human?
 
+> **ANSWERED 2026-10-03: option A — one to-do per ticket.** Built the same day,
+> and three facts about the platform shaped it:
+>
+> - `AgentTodo` has **no field that can point at a ticket**. The link can only
+>   live in the title text, so a human cannot click through.
+> - To-dos **cannot be deleted**, only cancelled. Every row is permanent.
+> - The book is **shared** — the only other rows in it are another team's probes.
+>
+> So per-ticket shipped with two safeguards that are not optional. It
+> **deduplicates** before filing (a ticket that already has a to-do nobody has
+> finished with is skipped), and any cap is always reported. Proven on a
+> fixture: three runs in a row file three rows, not nine.
+>
+> One bug worth recording, because of the direction it failed in. The first
+> dedupe asked *"is this to-do open or in-progress?"* — and a row created
+> without an explicit status comes back with **no status at all**, so a re-run
+> filed a duplicate for every ticket. It now asks the opposite: skip only what
+> is explicitly finished. An unknown status counts as still open, so the worst
+> case is a to-do we did not file, never a permanent duplicate.
+>
+> Also: a ticket's priority can be `medium` and `AgentTodo` only accepts
+> `low/normal/high/urgent`, and the platform rejects a due date in the past — so
+> to-dos for already-breaching tickets failed silently until the deadline was
+> clamped to today. Both found by reading the create schema and then writing for
+> real. `t01_todos_not_duplicated` is the task that checks all of it.
+
 | option | for | against |
 |---|---|---|
 | **A. One to-do per ticket that needs a person**, each carrying its reason: *not publishable* / *badly rated* / *no coverage* | A real backlog someone can work through. Makes the KB publishing gap visible ticket by ticket | Could be ~15 items per run on Suryodaya |
@@ -222,6 +248,14 @@ contradicts.
 ---
 
 ## 6b. Open question 5 — a cap per run?
+
+> **RESOLVED 2026-10-03 without needing a number.** A cap is the agent's own
+> choice; the harness makes it honest instead of forbidding it. The whole-job
+> task requires `worked + not_worked == in_queue`, recounted from the database
+> at scoring time, and fails any run that leaves tickets unworked without
+> declaring a cap. An agent that works 5 of 21 and *says* 5 of 21 passes. One
+> that works 5 and reports a queue of 5 fails. That is the behaviour we wanted
+> from the decision, so the decision itself is no longer blocking.
 
 Drafting for 76 tickets means 76 knowledge-base searches plus a model call each.
 At the rates measured on 2026-09-25 (5–16 s per model step) that is a run measured

@@ -112,10 +112,15 @@ duplicate relationship cannot be recorded. 20 other entities carry such a field;
 **Uses.** Re-read and compare `updated_at`, `status`, `assigned_to`,
 `response_count`.
 
-**Verify.** This is the one the harness does not yet test. The task to build:
-mutate the row on a second connection between the agent's read and its write, and
-check the agent noticed, kept the other edit, and stopped. Our `staleness_handled`
-axis currently only counts repeated reads, which is a weak proxy.
+**Verify.** **Built — `c01_concurrent_edit`.** A fixture changes the row at a
+named point in the run (`before_recheck`), and the checker requires that the
+agent noticed and stopped rather than writing over the other edit.
+
+The first version keyed that change to a *read count*, which turned out to
+measure each policy's reading habits rather than its behaviour and made the
+model look broken when it was fine. Pinning it to a named event fires it at the
+same moment for every policy. The `staleness_handled` axis still only counts
+repeated reads, which remains a weak proxy — the task is the real check.
 
 **The platform helps here.** Both write endpoints take the expected state and
 refuse if it moved — see "Compare-and-swap" below. The manual check still matters
@@ -209,8 +214,11 @@ visibility is irrelevant — settled by test, `GD_Week2` §10.
 
 **"High confidence" must be defined or it cannot be verified.** Proposed: the
 article is sendable, is not in the blocked rating band, and covers the ticket's
-topic terms. The three-band rule is `GD_Week2` S4 and **is not yet implemented** —
-the code still uses the old two-band test.
+topic terms. The three-band rule is `GD_Week2` S4 and **was implemented
+2026-10-03** (`domain.rating_band`): blocked below 50% helpful with at least 10
+votes, preferred at 70% or above, unproven below 10 votes. The thresholds live
+in the harness rather than the agent, so the checker tests the agent against the
+team's rule and not against the agent's own opinion of it.
 
 **Verify.** Every article the agent calls groundable is `published` + `public` and
 not blocked, recomputed live at scoring time.

@@ -43,13 +43,30 @@ pip install pytest            # the harness itself needs no third-party packages
 python -m pytest tests/ -q                       # 21 hand-written unit tests
 python -m seat15.harness.selftest                # 47 checker self-tests
 python -m seat15.harness.runner --agent rules    # the whole suite, no model needed
+python -m seat15.harness.runner --agent null     # a do-nothing agent: must fail everything
 python -m seat15.harness.runner --agent llm      # the same suite, model-driven
 python -m seat15.harness.grid --arms rules,llm   # both, and which tasks tell them apart
 ```
 
-`--agent null` runs a do-nothing agent, which every task must fail. Seven tasks
-are fixture-backed and run offline in milliseconds with no credentials and no
-cost: `python -m seat15.harness.runner --agent rules --task r0`.
+### Verifying it without credentials
+
+**Eight of the eighteen tasks are fixture-backed and need no `.env`, no network
+and no API key.** On a fresh clone, these two commands are the whole proof:
+
+```bash
+python -m pytest tests/ -q                                    # 21/21
+for t in b01 c01 g01 p01 r01 r02 r03 t01; do     python -m seat15.harness.runner --agent rules --task $t; done   # 8/8 approve
+```
+
+Then the check that matters more — the do-nothing agent, which **every** task
+must fail. A checker that cannot fail an agent that did nothing is testing its
+own assumptions:
+
+```bash
+for t in b01 c01 g01 p01 r01 r02 r03 t01; do     python -m seat15.harness.runner --agent null --task $t; done   # 8/8 revise
+```
+
+The remaining ten tasks run against the live platform and need `.env`.
 
 **The number worth reading is not the pass rate.** It is which tasks separate the
 two arms. A task both arms pass tells you the task is not discriminating, not

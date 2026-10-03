@@ -1,0 +1,132 @@
+{
+ "instance": "fixture",
+ "note": "Built from refusal_reasons on 2026-10-03. Three new tickets, none answerable from the knowledge base, so all three escalate. ONE of them (TKT-FIX-0042) already has an open to-do, and a second (TKT-FIX-0043) has one that is already cancelled. A correct agent files two to-dos: it skips the one still open and re-files the cancelled one, because cancelled means a human is finished with it. AgentTodo cannot be deleted on this platform, so filing a duplicate is permanent and the dedupe is the safeguard this fixture exists to test.",
+ "me": {
+  "id": "fixture-user",
+  "email": "team15@theschoolofai.in",
+  "roles": [
+   "support_user",
+   "user",
+   "agent_user"
+  ],
+  "allowed_apps": [
+   "support",
+   "agent",
+   "crm"
+  ],
+  "company_id": "fixture-company"
+ },
+ "schemas": {
+  "Ticket": "support",
+  "KBArticle": "support",
+  "AgentMemory": "agent"
+ },
+ "entities": {
+  "Ticket": [
+   {
+    "id": "r1",
+    "number": "TKT-FIX-0041",
+    "subject": "Shortage on the bracket line",
+    "description": "Asking about a bracket shortage.",
+    "status": "new",
+    "type": "complaint",
+    "priority": "high",
+    "created_at": "2026-10-01T09:00:00",
+    "updated_at": "2026-10-01T09:00:00",
+    "sla_response_due": "2026-10-05T09:00:00",
+    "response_count": 0,
+    "first_response_at": null,
+    "assigned_to": null
+   },
+   {
+    "id": "r2",
+    "number": "TKT-FIX-0042",
+    "subject": "Powdercoat colour mismatch",
+    "description": "Asking about a powdercoat colour mismatch.",
+    "status": "new",
+    "type": "complaint",
+    "priority": "high",
+    "created_at": "2026-10-01T09:00:00",
+    "updated_at": "2026-10-01T09:00:00",
+    "sla_response_due": "2026-10-05T09:00:00",
+    "response_count": 0,
+    "first_response_at": null,
+    "assigned_to": null
+   },
+   {
+    "id": "r3",
+    "number": "TKT-FIX-0043",
+    "subject": "Hydraulic manifold torque spec",
+    "description": "Asking about hydraulic manifold torque.",
+    "status": "new",
+    "type": "question",
+    "priority": "high",
+    "created_at": "2026-10-01T09:00:00",
+    "updated_at": "2026-10-01T09:00:00",
+    "sla_response_due": "2026-10-05T09:00:00",
+    "response_count": 0,
+    "first_response_at": null,
+    "assigned_to": null
+   }
+  ],
+  "KBArticle": [
+   {
+    "id": "a-notpub",
+    "title": "Bracket shortage guidance",
+    "content": "Brackets are allocated weekly.",
+    "status": "published",
+    "visibility": "internal",
+    "tags": [
+     "shortage",
+     "bracket"
+    ],
+    "helpful_count": 90,
+    "not_helpful_count": 3,
+    "folder_id": null,
+    "excerpt": "Brackets are allocated weekly."
+   },
+   {
+    "id": "a-badrated",
+    "title": "Powdercoat colour mismatch",
+    "content": "Colour is matched to the approved sample.",
+    "status": "published",
+    "visibility": "public",
+    "tags": [
+     "powdercoat",
+     "colour"
+    ],
+    "helpful_count": 2,
+    "not_helpful_count": 60,
+    "folder_id": null,
+    "excerpt": "Colour is matched to the approved sample."
+   }
+  ],
+  "AgentMemory": [],
+  "AgentTodo": [
+   {
+    "id": "t1",
+    "number": "TODO-FIX-0001",
+    "title": "[seat15] TKT-FIX-0042 needs a human: badly_rated",
+    "detail": "Filed by an earlier run.",
+    "priority": "high",
+    "status": "open"
+   },
+   {
+    "id": "t2",
+    "number": "TODO-FIX-0002",
+    "title": "[seat15] TKT-FIX-0043 needs a human: no_coverage",
+    "detail": "A human cancelled this one.",
+    "priority": "high",
+    "status": "cancelled"
+   },
+   {
+    "id": "t3",
+    "number": "TODO-FIX-0003",
+    "title": "[seat15] TKT-FIX-0041 needs a human: not_publishable",
+    "detail": "Created without an explicit status, which is how the platform returns such a row. Must still count as open.",
+    "priority": "high",
+    "status": null
+   }
+  ]
+ }
+}

@@ -38,6 +38,50 @@ NOT_COMPUTABLE = {
 }
 
 # The real policy as published for this seat. Business hours 09:00-18:00 Mon-Fri.
+# The three-band article rule (GD_Week2, agreed 2026-10-03). These live here, not
+# in the agent, for the same reason SLA_RESPONSE_HOURS does: they are a team
+# decision that the agent obeys and the verifier checks independently. If they sat
+# in domain.py the verifier would be grading the agent against its own opinion.
+MIN_VOTES = 10          # below this, a rating is noise either way
+BLOCK_BELOW = 0.50      # under half helpful, with enough votes: do not send
+PREFER_AT = 0.70        # at or above: prefer over an unproven article
+
+# The citation line attached to every drafted reply. It lives here, not in the
+# agent, so the verifier can rebuild it from the article row and require it in
+# the filed draft. The agent cannot then state a vote count the row does not
+# support - which is the whole reason the line exists.
+PROVENANCE = ("Source: %s - rated %d helpful / %d not helpful; rating provenance "
+              "is not recorded by the platform.")
+
+# Two different reasons an article is not `preferred`, and they need different
+# sentences. Found 2026-10-03 by a hand-written test probing the 50% boundary:
+# both cases shared one caveat, so an article with ten votes split five-five was
+# telling the customer "this has not been rated enough to be relied on" - which
+# is false. Ten people rated it. It is disputed, not unproven. The band rule the
+# team agreed is unchanged; only the sentence now depends on WHY.
+PROVENANCE_UNPROVEN = " This source has not been rated enough to be relied on."
+PROVENANCE_DISPUTED = (" Readers are split on this source: it has enough votes to "
+                       "judge and only %d%% found it helpful.")
+
+
+def provenance_line(article):
+    """The citation line for an article, built from its row.
+
+    One function, used by the agent to write the line and by the verifier to
+    check it. They cannot drift apart, which is the only reason checking the
+    line proves anything.
+    """
+    helpful = int(article.get("helpful_count") or 0)
+    unhelpful = int(article.get("not_helpful_count") or 0)
+    votes = helpful + unhelpful
+    line = PROVENANCE % (article.get("title"), helpful, unhelpful)
+    if votes < MIN_VOTES:
+        return line + PROVENANCE_UNPROVEN
+    share = helpful / float(votes)
+    if share < PREFER_AT:
+        return line + PROVENANCE_DISPUTED % round(100 * share)
+    return line
+
 SLA_RESPONSE_HOURS = {"urgent": 1, "high": 4, "medium": 8, "low": 24}
 SLA_RESOLUTION_HOURS = {"urgent": 8, "high": 24, "medium": 72, "low": 120}
 
@@ -198,6 +242,19 @@ class VerifyContext(object):
         10 of 100 on Suryodaya (GAP_REPORT 1.1)."""
         return [a for a in self.rest.list("KBArticle", limit=500)
                 if a.get("status") == "published" and a.get("visibility") == "public"]
+
+    def started_at(self):
+        """When the run began, from context.json — written before the agent ran.
+
+        Needed to tell "the agent miscounted" from "the book moved while it
+        worked". Without it, any verifier that recounts a shared book is one
+        other team's edit away from a false failure.
+        """
+        path = os.path.join(self.run_dir or "", "context.json")
+        if not os.path.exists(path):
+            return None
+        with open(path, encoding="utf-8") as fh:
+            return parse_dt(json.load(fh).get("local_utc"))
 
     def protected_reads(self):
         """Did the run touch an entity it reaches only through findings/001?"""

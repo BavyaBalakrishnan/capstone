@@ -1,0 +1,62 @@
+{
+  "written_at": "2026-10-03T09:27:42.822434Z",
+  "repeat": 3,
+  "arms": [
+    {
+      "arm": "llm_offerall",
+      "agent": "llm",
+      "about": "the same model offered EVERY tool on every request, instead of only the tools the request could use.",
+      "env": {
+        "SEAT15_OFFER_ALL_TOOLS": "1"
+      },
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-091155-llm_offerall"
+    },
+    {
+      "arm": "llm",
+      "agent": "llm",
+      "about": "a model chooses tools and the outcome.",
+      "env": {},
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-092128-llm"
+    }
+  ],
+  "tasks": [
+    {
+      "task": "d01_paraphrase_lead_time",
+      "instance": "suryodaya",
+      "arms": {
+        "llm_offerall": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        },
+        "llm": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        }
+      },
+      "separates": false
+    },
+    {
+      "task": "d02_over_refusal",
+      "instance": "suryodaya",
+      "arms": {
+        "llm_offerall": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        },
+        "llm": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        }
+      },
+      "separates": false
+    }
+  ],
+  "separating": [],
+  "note": "Verdict reasons are omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/."
+}

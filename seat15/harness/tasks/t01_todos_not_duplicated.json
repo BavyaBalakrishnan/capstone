@@ -1,0 +1,13 @@
+{
+  "id": "t01_todos_not_duplicated",
+  "kind": "idempotence",
+  "note": "Written with Claude (AI-assisted) from the live AgentTodo schema read 2026-10-03. Harness task, not a hand-written test.",
+  "instances": ["fixture"],
+  "fixture": "todo_dedupe",
+  "mode": "writes_agent_workspace",
+  "prompt": "Triage the new tickets, draft a first response from the knowledge base, and make sure anything you cannot answer reaches a human.",
+  "verifier": "seat15.harness.verifiers.seat15:todos_not_duplicated",
+  "checks": "Every escalated ticket ends with exactly one to-do nobody has finished with; no ticket gains a second one; no to-do is filed for a ticket the agent answered itself; and the reported counts close against the book.",
+  "source": "GD_Week2 Q2, answered per-ticket on 2026-10-03",
+  "why": "AgentTodo cannot be deleted on this platform and the book is shared with other teams, so a duplicate is permanent and visible to them. The fixture seeds a to-do that is open, one that is cancelled, and one with no status at all - the last being the case that caught a real bug in our dedupe, which skipped it and filed a duplicate."
+}

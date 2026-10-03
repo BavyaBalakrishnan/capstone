@@ -22,7 +22,8 @@ calls the same way, so the `cheated` and health axes behave identically.
 import json
 import os
 
-from seat15.harness.client import PROTECTED_ENTITIES, READ_SUFFIXES, WRITABLE, Refused
+from seat15.harness.client import (PROTECTED_ENTITIES, READ_SUFFIXES, READ_TOOLS,
+                                   WRITABLE, Refused)
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
@@ -166,7 +167,13 @@ class FakeClient(object):
             self.calls.append({"door": "mcp", "tool": name, "entity": entity,
                                "protected": False, "error": False})
             return self.tool_results[name], None
-        if not name.endswith(READ_SUFFIXES):
+        # The same allow-list the real client uses. A fixture whose guard is
+        # stricter than the platform's is its own kind of lie: a tool refused
+        # here but served live makes a task pass for the wrong reason, which is
+        # how `preflight` stayed broken for two weeks. Found again 2026-10-03
+        # when a new fixture refused AgentPersona.daily_limits and preflight
+        # quietly reported "limits unreadable".
+        if not name.endswith(READ_SUFFIXES) and name not in READ_TOOLS:
             if not name.endswith((".create", ".update")):
                 raise Refused("%r is not a read tool and not an allowed write" % name)
             if entity not in WRITABLE:
@@ -177,6 +184,10 @@ class FakeClient(object):
             self.calls.append({"door": "mcp", "tool": name, "entity": entity,
                                "protected": entity in PROTECTED_ENTITIES, "error": False})
             row = dict(args, id="fixture-%d" % len(self.writes))
+            # The platform assigns a human number on create and callers record
+            # it. Without one, a finding's list of filed rows reads "[None]".
+            row.setdefault("number", "%s-FIX-%04d"
+                           % (entity[:4].upper(), len(self.writes)))
             self.entities.setdefault(entity, []).append(row)
             self._persist(entity, row)
             return row, None

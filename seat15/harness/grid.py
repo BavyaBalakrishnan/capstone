@@ -39,6 +39,17 @@ ARMS = {
             "about": "a model chooses tools and the outcome."},
     "llm_high": {"agent": "llm", "env": {"SEAT15_LLM_REASONING": "high"},
                  "about": "the same model, thinking harder. One variable moves."},
+    "llm_offerall": {"agent": "llm", "env": {"SEAT15_OFFER_ALL_TOOLS": "1"},
+                     "about": ("the same model offered EVERY tool on every request, "
+                               "instead of only the tools the request could use.")},
+    "llm_noqueuetools": {"agent": "llm",
+                         "env": {"SEAT15_HIDE_TOOLS": "triage_queue,write_reply"},
+                         "about": ("the same model with the two queue tools hidden. "
+                                   "Tests whether merely LISTING them changes "
+                                   "behaviour on tasks that do not need them.")},
+    "llm_nofinishguard": {"agent": "llm", "env": {"SEAT15_NO_FINISH_GUARD": "1"},
+                          "about": ("the same model, with the loop no longer holding it "
+                                    "to finishing the drafts its own triage asked for.")},
     "llm_nopreflight": {"agent": "llm", "env": {"SEAT15_HIDE_TOOLS": "preflight"},
                         "about": ("the same model with `preflight` hidden from the "
                                   "advertised tool list. The loop still runs it; only "
@@ -48,8 +59,26 @@ ARMS = {
 
 def run_arm(name, tasks_filter, instance, repeat, clients):
     arm = ARMS[name]
+    # Restore afterwards. Found 2026-10-03: an arm set SEAT15_NO_FINISH_GUARD and
+    # never unset it, so EVERY later arm inherited it and the grid reported "these
+    # arms are identical" - which they were, because both were the same arm. The
+    # bug is invisible whenever the arm with env vars happens to run last, which
+    # is how it survived two earlier grids. An experiment that does not reset
+    # between arms is not an experiment.
+    before = {k: os.environ.get(k) for k in arm["env"]}
     for k, v in arm["env"].items():
         os.environ[k] = v
+    try:
+        return _run_arm(name, arm, tasks_filter, instance, repeat, clients)
+    finally:
+        for k, v in before.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def _run_arm(name, arm, tasks_filter, instance, repeat, clients):
     model = None
     if arm["agent"] == "llm":
         from seat15.agent.agent import pin_llm_config

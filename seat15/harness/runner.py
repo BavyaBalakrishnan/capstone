@@ -23,6 +23,7 @@ import glob
 import importlib
 import json
 import os
+import re
 import sys
 import uuid
 
@@ -38,6 +39,20 @@ RUNS_DIR = os.path.join(os.path.dirname(os.path.dirname(HERE)), "runs")
 
 
 # --------------------------------------------------------------------------- disk
+
+# Failures that are ours, not the agent's: no quota, no budget, rate limited,
+# endpoint down, nothing listening. Deliberately narrow - a 4xx about the
+# REQUEST is the agent's problem and must still be graded.
+OUR_FAULT = re.compile(
+    r"HTTP 429|HTTP 5\d\d|quota|rate.?limit|insufficient_quota|billing"
+    r"|timed out|Connection (refused|reset|aborted)|Name or service not known"
+    r"|Temporary failure in name resolution", re.I)
+
+
+def _why(text):
+    m = OUR_FAULT.search(text)
+    return m.group(0) if m else "unknown"
+
 
 def _write(path, obj):
     with open(path, "w", encoding="utf-8") as fh:
@@ -146,6 +161,17 @@ def run_one(task, instance, agent, stamp, clients, model=None, attempt=1):
     except Exception as e:  # a crashing agent is a result, not a harness failure
         trace({"event": "agent_crashed", "error": repr(e)})
         result = {"ended": "crashed", "claimed_success": False, "error": repr(e)}
+        # A crash caused by OUR side being unavailable is not evidence about the
+        # agent. Found 2026-10-03: the model endpoint returned HTTP 429 (daily
+        # quota exhausted) and six runs were scored `revise` with health "ok",
+        # so a one-variable experiment reported "these two configurations are
+        # identical" when in truth neither had run. This is the same mistake as
+        # the /api/schemas timeout on 2026-09-25, from a different cause, so the
+        # rule is now about the class: if the thing that failed was ours, the
+        # run is degraded and cannot be judged.
+        if OUR_FAULT.search(repr(e)):
+            result["degraded"] = True
+            result["degraded_reason"] = "model endpoint unavailable: %s" % _why(repr(e))
     result["calls"] = result.get("calls") or agent_client.calls
     for c in result["calls"]:
         trace(dict(c, event="call"))
@@ -164,10 +190,17 @@ def judge(run_dir, clients):
     instance = context["instance"]
     ctx = VerifyContext(run_dir, client_for(task, instance, clients, run_dir=run_dir),
                         context["run_id"], instance, task=task)
-    try:
-        verdict, reason = resolve(task["verifier"])(ctx)
-    except Exception as e:  # a verifier that raises cannot judge
-        verdict, reason = UNEVALUATED, "verifier raised: %r" % e
+    # A run our own side broke cannot be graded. Checked BEFORE the verifier,
+    # because the verifier would correctly find no finding and return `revise` -
+    # a true statement about the evidence and a false one about the agent.
+    if (ctx.result.get("degraded_reason") or "").strip():
+        verdict = UNEVALUATED
+        reason = "not judged: %s" % ctx.result["degraded_reason"]
+    else:
+        try:
+            verdict, reason = resolve(task["verifier"])(ctx)
+        except Exception as e:  # a verifier that raises cannot judge
+            verdict, reason = UNEVALUATED, "verifier raised: %r" % e
     scored = axes.score(ctx.result, verdict)
     # A verifier that could not reach the platform is a degraded run as surely as
     # an agent that could not. Found 2026-10-03: a verifier Transport failure was

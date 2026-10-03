@@ -10,6 +10,11 @@ knowledge base, and tell me which will breach SLA."*
 
 | | |
 |---|---|
+| [`seat15/harness/`](seat15/harness/) | **The evaluation harness.** 18 tasks, 15 checkers, 6 fixtures, a two-arm experiment runner. Every checker reads the database; none reads the agent's prose. |
+| [`seat15/agent/`](seat15/agent/) | **The agent.** One loop, a fixed tool set, two policies — a fixed script and a model — over the same tools. All factual decisions live in `domain.py`, with no model in that file. |
+| [`tests/`](tests/) | 21 unit tests, hand-written by the team, not generated. |
+| [`HARNESS_STATUS.md`](HARNESS_STATUS.md) | **Start here for the harness.** What it does, what it has caught, what is still open. Written for someone who has not seen the code. |
+| [`proofs/`](proofs/) | Sanitised run summaries and experiment results. Verdict reasons are stripped: they quote ticket subjects and article titles from books other teams share. |
 | [`GAP_REPORT.md`](GAP_REPORT.md) | Week-one deliverable. What commercial helpdesk products do that AgentSwitch does not, which gaps an agent can close with this seat's existing tools, and what an agent can do that those products cannot. |
 | [`findings/`](findings/) | Defects found while measuring the platform. One filed and fixed; four written up. |
 | [`as.sh`](as.sh) | Shell helpers for logging in and calling MCP. Reads credentials from `.env`, so the password never reaches shell history. |
@@ -29,11 +34,56 @@ both are recorded rather than quietly dropped.
 | 005 | `reopen_count` holding values unreachable under the state machine (56 reopens on a ticket in `new`); `response_count` 48 against zero reply rows | **no longer reproduces** — max `reopen_count` is now 1, max `response_count` 1. Fixed or reseeded between passes. The `sender_type` limb was not re-tested |
 | 006 | `AgentTask.last_run_status` holds `queued`, a value its schema does not declare (15/96); 31 `cron` rows whose `cron_expression` is a product name; Keystone's two live tasks report 30 runs with `last_run_at` null | **new** — written up |
 
+## Running it
+
+```bash
+cp .env.example .env          # then fill in: two passwords, one model API key
+pip install pytest            # the harness itself needs no third-party packages
+
+python -m pytest tests/ -q                       # 21 hand-written unit tests
+python -m seat15.harness.selftest                # 47 checker self-tests
+python -m seat15.harness.runner --agent rules    # the whole suite, no model needed
+python -m seat15.harness.runner --agent llm      # the same suite, model-driven
+python -m seat15.harness.grid --arms rules,llm   # both, and which tasks tell them apart
+```
+
+`--agent null` runs a do-nothing agent, which every task must fail. Seven tasks
+are fixture-backed and run offline in milliseconds with no credentials and no
+cost: `python -m seat15.harness.runner --agent rules --task r0`.
+
+**The number worth reading is not the pass rate.** It is which tasks separate the
+two arms. A task both arms pass tells you the task is not discriminating, not
+that both agents are good. `HARNESS_STATUS.md` section 8 explains why most of
+ours do not.
+
+## What this writes
+
+The week-one gap report was produced entirely read-only. **The agent is not.** It
+writes to two entities, both inside this team's own `agent` workspace, and the
+client refuses writes to anything else in code:
+
+| Entity | Why | Reversible? |
+|---|---|---|
+| `AgentMemory` | One row per run holding the finding the harness grades. Evidence, not output. | Yes — ordinary rows |
+| `AgentTodo` | One to-do per ticket the agent could not answer, so a human sees it | **No.** This platform allows create and update but **not delete.** A row can be cancelled, never removed |
+
+Because to-dos cannot be deleted and the book is shared with other teams, the
+agent **deduplicates before filing**: a ticket that already has a to-do nobody
+has finished with is skipped. Three runs in a row file three rows, not nine, and
+`t01_todos_not_duplicated` is the task that proves it.
+
+Nothing is written to `Ticket`, `KBArticle` or any customer-facing field. The
+agent drafts replies and files them as evidence; sending them is a team decision
+that has not been taken (`GD_Week2` Q9).
+
 ## Method
 
-Everything measured was pulled **read-only** over MCP and REST against both
-instances, and every figure was re-derived from the saved pulls before the report
-was written. **Nothing was written to either book.**
+Everything in the **gap report** was pulled read-only over MCP and REST against
+both instances, and every figure was re-derived from the saved pulls before the
+report was written. Nothing was written to either book for that work.
+
+The **agent** does write, to the two entities listed above. See "What this
+writes".
 
 Figures were re-pulled and recomputed on **2026-09-20**, the submission date,
 rather than carried over from the first pass. These books are shared, and they

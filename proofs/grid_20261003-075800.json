@@ -1,0 +1,45 @@
+{
+  "written_at": "2026-10-03T07:58:00.198686Z",
+  "repeat": 3,
+  "arms": [
+    {
+      "arm": "llm_nofinishguard",
+      "agent": "llm",
+      "about": "the same model, with the loop no longer holding it to finishing the drafts its own triage asked for.",
+      "env": {
+        "SEAT15_NO_FINISH_GUARD": "1"
+      },
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-075101-llm_nofinishguard"
+    },
+    {
+      "arm": "llm",
+      "agent": "llm",
+      "about": "a model chooses tools and the outcome.",
+      "env": {},
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-075442-llm"
+    }
+  ],
+  "tasks": [
+    {
+      "task": "q01_queue_worked_and_accounted",
+      "instance": "keystone",
+      "arms": {
+        "llm_nofinishguard": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        },
+        "llm": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        }
+      },
+      "separates": false
+    }
+  ],
+  "separating": [],
+  "note": "Verdict reasons are omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/."
+}

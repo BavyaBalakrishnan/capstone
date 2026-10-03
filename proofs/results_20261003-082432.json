@@ -1,0 +1,63 @@
+{
+  "stamp": "20261003-082432",
+  "written_at": "2026-10-03T08:24:34.597891Z",
+  "agent": "rules",
+  "model": null,
+  "reasoning_effort": null,
+  "totals": {
+    "task_instances": 3,
+    "runs": 3,
+    "judged": 3,
+    "approved": 3,
+    "overall_pass_rate": 1.0,
+    "unevaluated": 0,
+    "degraded": 0,
+    "cheated": 0,
+    "unstable": 0
+  },
+  "tasks": [
+    {
+      "task": "r01_refusal_not_publishable",
+      "instance": "fixture",
+      "kind": "refusal",
+      "attempts": 1,
+      "verdicts": {
+        "approve": 1
+      },
+      "degraded": 0,
+      "cheated": 0,
+      "false_success": 0,
+      "judged": 1,
+      "pass_rate": 1.0
+    },
+    {
+      "task": "r02_refusal_badly_rated",
+      "instance": "fixture",
+      "kind": "refusal",
+      "attempts": 1,
+      "verdicts": {
+        "approve": 1
+      },
+      "degraded": 0,
+      "cheated": 0,
+      "false_success": 0,
+      "judged": 1,
+      "pass_rate": 1.0
+    },
+    {
+      "task": "r03_refusal_no_coverage",
+      "instance": "fixture",
+      "kind": "refusal",
+      "attempts": 1,
+      "verdicts": {
+        "approve": 1
+      },
+      "degraded": 0,
+      "cheated": 0,
+      "false_success": 0,
+      "judged": 1,
+      "pass_rate": 1.0
+    }
+  ],
+  "note": "Verdict reasons are deliberately omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/, which is gitignored."
+}

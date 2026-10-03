@@ -38,6 +38,10 @@ REPEAT_LIMIT = 2
 # --------------------------------------------------------------------------- tools
 
 TOOLS = {
+    "preflight": {
+        "fn": lambda a, c: domain.preflight(c),
+        "args": {},
+        "about": "is this agent switched on and in budget? Call before anything else."},
     "seat_context": {
         "fn": lambda a, c: domain.seat_context(c),
         "args": {}, "about": "who am I: instance, roles, allowed_apps. Call first."},
@@ -104,12 +108,18 @@ def assemble_finding(results, outcome, summary="", conflict=None):
             break
     if "draft_reply" in results:
         r = results["draft_reply"]
-        f["reply"] = {k: r.get(k) for k in ("drafted", "sendable", "grounded_article_ids")}
+        f["reply"] = {k: r.get(k) for k in ("drafted", "sendable",
+                                            "grounded_article_ids",
+                                            "refusal_reason", "reason")}
         f["flagged_for_review"] = r.get("flag_for_review") or []
     elif "kb_candidates" in results:
         k = results["kb_candidates"]
         f["reply"] = {"drafted": False, "sendable": False, "grounded_article_ids": []}
         f["flagged_for_review"] = k.get("flag_for_review") or []
+    if "preflight" in results:
+        p = results["preflight"]
+        f["preflight"] = {k: p.get(k) for k in ("checked", "halt", "reason",
+                                                "personas", "usable", "blocked")}
     if "digest_status" in results:
         f["digest"] = {k: results["digest_status"].get(k)
                        for k in ("name", "went_out", "reason")}
@@ -156,6 +166,15 @@ class Agent(object):
         return TOOLS[tool]["fn"](args, self.c)
 
     def run(self, prompt):
+        # Preflight is not left to the policy. An agent that is switched off or out
+        # of budget must stop before it reads anything, and that must not depend on
+        # a model choosing to check.
+        pre = domain.preflight(self.c)
+        self.results["preflight"] = pre
+        self.trace({"event": "preflight", "result": pre})
+        if pre.get("halt"):
+            return self._finish("halted", "preflight: %s" % pre.get("reason"), "halted")
+
         history = []
         for step in range(1, MAX_STEPS + 1):
             left = MAX_STEPS - step

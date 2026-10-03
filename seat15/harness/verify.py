@@ -86,7 +86,8 @@ class VerifyContext(object):
     other teams edit the same rows between the run and the scoring.
     """
 
-    def __init__(self, run_dir, rest, run_id, instance):
+    def __init__(self, run_dir, rest, run_id, instance, task=None):
+        self.task = task or {}
         self.run_dir = run_dir
         self.rest = rest            # a Client; verifiers use the REST door
         self.run_id = run_id

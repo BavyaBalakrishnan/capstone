@@ -1,0 +1,35 @@
+{
+  "stamp": "20261003-025035",
+  "written_at": "2026-10-03T02:50:36.049273Z",
+  "agent": "null",
+  "model": null,
+  "reasoning_effort": null,
+  "totals": {
+    "task_instances": 1,
+    "runs": 1,
+    "judged": 1,
+    "approved": 0,
+    "overall_pass_rate": 0.0,
+    "unevaluated": 0,
+    "degraded": 0,
+    "cheated": 0,
+    "unstable": 0
+  },
+  "tasks": [
+    {
+      "task": "r01_refusal_not_publishable",
+      "instance": "fixture",
+      "kind": "refusal",
+      "attempts": 1,
+      "verdicts": {
+        "revise": 1
+      },
+      "degraded": 0,
+      "cheated": 0,
+      "false_success": 0,
+      "judged": 1,
+      "pass_rate": 0.0
+    }
+  ],
+  "note": "Verdict reasons are deliberately omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/, which is gitignored."
+}

@@ -25,8 +25,8 @@ from seat15.harness.verifiers import seat15 as V
 class Stub(VerifyContext):
     """A VerifyContext whose finding and trace are supplied, not read from disk."""
 
-    def __init__(self, rest, instance, finding, trace=None):
-        VerifyContext.__init__(self, None, rest, "selftest", instance)
+    def __init__(self, rest, instance, finding, trace=None, task=None):
+        VerifyContext.__init__(self, None, rest, "selftest", instance, task=task)
         self._stub_finding = finding
         self._stub_trace = trace or []
 

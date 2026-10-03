@@ -163,7 +163,7 @@ def judge(run_dir, clients):
         context = json.load(fh)
     instance = context["instance"]
     ctx = VerifyContext(run_dir, client_for(task, instance, clients, run_dir=run_dir),
-                        context["run_id"], instance)
+                        context["run_id"], instance, task=task)
     try:
         verdict, reason = resolve(task["verifier"])(ctx)
     except Exception as e:  # a verifier that raises cannot judge

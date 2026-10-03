@@ -72,6 +72,42 @@ def resolve_entity(client, name):
     return None
 
 
+def preflight(client):
+    """Is this agent allowed to run at all, and does it have budget left?
+
+    `AgentPersona.daily_limits` is the platform's own kill switch and meter: per
+    persona it returns `blocked`, `tokens_remaining_today` and
+    `spend_remaining_today_usd`. There is no separate switch.
+
+    Halting is decided on capacity, not on any single persona: if nothing visible
+    is both unblocked and in credit, there is no way to do the work, so the run
+    stops before reading a single ticket.
+    """
+    try:
+        sc, err = client.call("AgentPersona.daily_limits", {})
+    except Exception as e:
+        return {"checked": False, "halt": False, "reason": "limits unreadable: %r" % e}
+    if err:
+        return {"checked": False, "halt": False, "reason": "limits unreadable: %s" % err}
+    result = (sc or {}).get("result") or sc or {}
+    personas = result.get("personas") or []
+    if not personas:
+        return {"checked": True, "halt": False, "personas": 0,
+                "reason": "no personas visible to this seat"}
+    usable = [p for p in personas
+              if not p.get("blocked")
+              and (p.get("spend_remaining_today_usd") is None
+                   or p.get("spend_remaining_today_usd") > 0)
+              and (p.get("tokens_remaining_today") is None
+                   or p.get("tokens_remaining_today") > 0)]
+    blocked = [p.get("persona_name") for p in personas if p.get("blocked")]
+    return {"checked": True, "halt": not usable, "personas": len(personas),
+            "usable": len(usable), "blocked": blocked,
+            "reason": ("no persona is both unblocked and in credit"
+                       if not usable else "%d of %d personas can run"
+                       % (len(usable), len(personas)))}
+
+
 def seat_context(client):
     status, me = client.me()
     if status != 200:
@@ -356,10 +392,23 @@ def draft_reply(client, ticket_ref, query):
     kb = kb_candidates(client, query)
     t = get_ticket(client, ticket_ref) if ticket_ref else None
     if not kb["usable"]:
+        # Three refusals that mean different things to whoever picks this up:
+        # a publishing problem, a content-quality problem, and a coverage gap.
+        # Collapsing them into one sentence loses the only actionable part.
+        best = kb["top"][0] if kb["top"] else None
+        if not kb["matches"]:
+            code, why = "no_coverage", "nothing in the knowledge base matches %r" % query
+        elif any(a["sendable"] and a["badly_rated"] for a in kb["top"]):
+            code, why = ("badly_rated",
+                         "the best sendable match is rated %s helpful / %s not helpful"
+                         % (best["helpful"], best["not_helpful"]) if best else "")
+        else:
+            code, why = ("not_publishable",
+                         "%d article(s) answer this; none is both published and public"
+                         % kb["matches"])
         return {"drafted": False, "sendable": False, "grounded_article_ids": [],
                 "flag_for_review": kb["flag_for_review"],
-                "reason": ("%d articles match %r but none is both published+public and "
-                           "acceptably rated" % (kb["matches"], query))}
+                "refusal_reason": code, "reason": why}
     best = kb["usable"][0]
     return {"drafted": True, "sendable": True,
             "grounded_article_ids": [best["id"]],

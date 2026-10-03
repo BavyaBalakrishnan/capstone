@@ -52,6 +52,8 @@ class FakeClient(object):
         # work; nothing in the harness tested it until now. Deterministic by
         # read count rather than by clock, so a run is reproducible.
         self.mutations = list(data.get("mutations", []))
+        # Canned answers for endpoint tools, which are not entity reads.
+        self.tool_results = data.get("tool_results", {})
         self.reads = 0
         self.applied = []
         self.calls = []
@@ -160,6 +162,10 @@ class FakeClient(object):
     def call(self, name, arguments=None):
         """Mirrors the real guard: reads pass, writes only to our own workspace."""
         entity = name.split(".")[0]
+        if name in self.tool_results:
+            self.calls.append({"door": "mcp", "tool": name, "entity": entity,
+                               "protected": False, "error": False})
+            return self.tool_results[name], None
         if not name.endswith(READ_SUFFIXES):
             if not name.endswith((".create", ".update")):
                 raise Refused("%r is not a read tool and not an allowed write" % name)

@@ -1,0 +1,78 @@
+{
+  "instance": "fixture",
+  "note": "For the preflight task. Every persona is blocked or out of credit, so the run must stop before reading a ticket. Shape copied from the live AgentPersona.daily_limits response on 2026-09-30.",
+  "me": {
+    "id": "fixture-user",
+    "email": "team15@theschoolofai.in",
+    "roles": [
+      "support_user",
+      "user",
+      "agent_user"
+    ],
+    "allowed_apps": [
+      "support",
+      "agent",
+      "crm"
+    ],
+    "company_id": "fixture-company"
+  },
+  "schemas": {
+    "Ticket": "support",
+    "KBArticle": "support",
+    "AgentMemory": "agent"
+  },
+  "tool_results": {
+    "AgentPersona.daily_limits": {
+      "status": "ok",
+      "result": {
+        "personas": [
+          {
+            "persona_id": "p1",
+            "persona_name": "Helpdesk Agent",
+            "tokens_used_today": 1000000,
+            "daily_token_budget": 1000000,
+            "tokens_remaining_today": 0,
+            "spend_today_usd": 0.6864,
+            "daily_llm_budget_usd": 0.6864,
+            "spend_remaining_today_usd": 0.0,
+            "blocked": true,
+            "resets_at": "2026-10-04T00:00:00+00:00"
+          },
+          {
+            "persona_id": "p2",
+            "persona_name": "Triage Agent",
+            "tokens_used_today": 1000000,
+            "daily_token_budget": 1000000,
+            "tokens_remaining_today": 0,
+            "spend_today_usd": 0.6864,
+            "daily_llm_budget_usd": 0.6864,
+            "spend_remaining_today_usd": 0.0,
+            "blocked": true,
+            "resets_at": "2026-10-04T00:00:00+00:00"
+          }
+        ]
+      }
+    }
+  },
+  "entities": {
+    "Ticket": [
+      {
+        "id": "fx-b1",
+        "number": "TKT-FIX-0033",
+        "subject": "Anything at all",
+        "description": "A ticket that must not be read.",
+        "status": "new",
+        "type": "question",
+        "priority": "high",
+        "created_at": "2026-10-01T09:00:00",
+        "updated_at": "2026-10-01T09:00:00",
+        "sla_response_due": "2026-10-02T09:00:00",
+        "response_count": 0,
+        "first_response_at": null,
+        "assigned_to": null
+      }
+    ],
+    "KBArticle": [],
+    "AgentMemory": []
+  }
+}

@@ -76,7 +76,18 @@ class Transport(Exception):
 
 
 def load_env(path=ENV_PATH):
+    """Read .env if it is there. A missing file is not an error.
+
+    Found 2026-10-03 by cloning the repo into an empty directory: this raised
+    FileNotFoundError, and because the runner built a live Client before
+    looking at which tasks were asked for, a fresh checkout could not run a
+    single OFFLINE fixture task. The README tells a reader those need no
+    credentials, which was true of the tasks and false of the program.
+    Environment variables are a legitimate way to supply all of this.
+    """
     env = {}
+    if not os.path.exists(path):
+        return env
     with open(path, "r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()

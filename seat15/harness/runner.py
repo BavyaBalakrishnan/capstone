@@ -118,6 +118,18 @@ def resolve(spec):
     return getattr(importlib.import_module(mod), fn)
 
 
+class LazyClients(dict):
+    """Live clients, created on first use.
+
+    A dict rather than a function so every existing `clients[instance]` call
+    site keeps working unchanged.
+    """
+
+    def __missing__(self, instance):
+        self[instance] = Client(instance, allow_writes=True)
+        return self[instance]
+
+
 def client_for(task, instance, clients, allow_writes=False, run_dir=None):
     """A fixture task runs entirely offline, for the agent and the verifier alike.
 
@@ -228,7 +240,10 @@ def main(argv=None):
                          "not a measurement.")
     args = ap.parse_args(argv)
 
-    clients = {i: Client(i) for i in ("suryodaya", "keystone")}
+    # Built only if something actually needs the platform. A fixture-only
+    # selection must run with no credentials at all, which is the whole point
+    # of having fixtures.
+    clients = LazyClients()
     model = None
     if args.agent == "llm":
         from seat15.agent.agent import pin_llm_config

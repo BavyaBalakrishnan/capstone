@@ -145,7 +145,7 @@ def main(argv=None):
     if bad:
         sys.exit("unknown arm(s): %s" % bad)
 
-    clients = {i: Client(i) for i in ("suryodaya", "keystone")}
+    clients = runner.LazyClients()   # built on first use, so fixtures need no .env
     results = []
     for n in names:
         print("\n=== arm %r: %s" % (n, ARMS[n]["about"]))

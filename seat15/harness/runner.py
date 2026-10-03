@@ -28,6 +28,8 @@ import uuid
 
 from seat15.harness import axes
 from seat15.harness.client import Client
+from seat15.harness.fake import FakeClient
+from seat15.harness.summarise import summarise
 from seat15.harness.verify import UNEVALUATED, VerifyContext
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -101,16 +103,30 @@ def resolve(spec):
     return getattr(importlib.import_module(mod), fn)
 
 
-def run_one(task, instance, agent, stamp, clients, model=None):
+def client_for(task, instance, clients, allow_writes=False, run_dir=None):
+    """A fixture task runs entirely offline, for the agent and the verifier alike.
+
+    Both get their own FakeClient, so anything the agent writes is shared through a
+    state file in the run directory rather than through memory - which keeps the
+    ordering the same as a live run and keeps `--rescore` working.
+    """
+    if task.get("fixture"):
+        state = os.path.join(run_dir, "fixture_state.json") if run_dir else None
+        return FakeClient(task["fixture"], instance, state_path=state)
+    return Client(instance, allow_writes=True) if allow_writes else clients[instance]
+
+
+def run_one(task, instance, agent, stamp, clients, model=None, attempt=1):
     run_id = "%s-%s-%s" % (stamp, instance, uuid.uuid4().hex[:8])
-    run_dir = os.path.join(RUNS_DIR, stamp, instance, task["id"])
+    name = task["id"] if attempt == 1 else "%s__try%d" % (task["id"], attempt)
+    run_dir = os.path.join(RUNS_DIR, stamp, instance, name)
     os.makedirs(run_dir, exist_ok=True)
 
     # 1. the task, exactly as it was when run
     _write(os.path.join(run_dir, "task.json"), task)
 
     # 2. context, captured BEFORE the agent starts. Server clock, not ours.
-    rest = clients[instance]
+    rest = client_for(task, instance, clients, run_dir=run_dir)
     status, me = rest.me()
     _write(os.path.join(run_dir, "context.json"), {
         "run_id": run_id, "instance": instance,
@@ -124,7 +140,7 @@ def run_one(task, instance, agent, stamp, clients, model=None):
 
     # 3. the agent, tracing as it goes
     trace = Trace(os.path.join(run_dir, "trace.jsonl"))
-    agent_client = Client(instance, allow_writes=False)
+    agent_client = client_for(task, instance, clients, run_dir=run_dir)
     try:
         result = agent(task, agent_client, run_id, trace)
     except Exception as e:  # a crashing agent is a result, not a harness failure
@@ -146,12 +162,19 @@ def judge(run_dir, clients):
     with open(os.path.join(run_dir, "context.json"), encoding="utf-8") as fh:
         context = json.load(fh)
     instance = context["instance"]
-    ctx = VerifyContext(run_dir, clients[instance], context["run_id"], instance)
+    ctx = VerifyContext(run_dir, client_for(task, instance, clients, run_dir=run_dir),
+                        context["run_id"], instance)
     try:
         verdict, reason = resolve(task["verifier"])(ctx)
     except Exception as e:  # a verifier that raises cannot judge
         verdict, reason = UNEVALUATED, "verifier raised: %r" % e
     scored = axes.score(ctx.result, verdict)
+    # A verifier that could not reach the platform is a degraded run as surely as
+    # an agent that could not. Found 2026-10-03: a verifier Transport failure was
+    # correctly returned as `unevaluated`, but the health column still read "ok",
+    # which reads as "the run was fine and the agent is unjudgeable".
+    if verdict == UNEVALUATED and "Transport" in str(reason):
+        scored["degraded"] = True
     scored.update({"task": task["id"], "kind": task.get("kind"), "instance": instance,
                    "reason": reason,
                    "judged_at": datetime.datetime.utcnow().isoformat() + "Z"})
@@ -167,6 +190,9 @@ def main(argv=None):
     ap.add_argument("--task", default=None, help="substring of task id")
     ap.add_argument("--instance", default=None, choices=["suryodaya", "keystone"])
     ap.add_argument("--rescore", default=None, help="a runs/<stamp> dir to re-grade")
+    ap.add_argument("--repeat", type=int, default=1,
+                    help="run each task N times. One run of a model is one sample, "
+                         "not a measurement.")
     args = ap.parse_args(argv)
 
     clients = {i: Client(i) for i in ("suryodaya", "keystone")}
@@ -183,15 +209,21 @@ def main(argv=None):
     else:
         stamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
         rows = []
-        for task in load_tasks(args.task):
-            for inst in task["instances"]:
-                if args.instance and inst != args.instance:
-                    continue
-                run_dir, _ = run_one(task, inst, AGENTS[args.agent], stamp, clients,
-                                     model=model)
-                rows.append(judge(run_dir, clients))
+        for attempt in range(1, args.repeat + 1):
+            for task in load_tasks(args.task):
+                for inst in task["instances"]:
+                    if args.instance and inst != args.instance:
+                        continue
+                    run_dir, _ = run_one(task, inst, AGENTS[args.agent], stamp, clients,
+                                         model=model, attempt=attempt)
+                    row = judge(run_dir, clients)
+                    row["attempt"] = attempt
+                    rows.append(row)
 
     _report(rows)
+    if not args.rescore:
+        path = summarise(rows, stamp, args.agent, model)
+        print("summary written: %s" % path)
     approved_by_null = [r for r in rows if r["verdict"] == "approve"] if args.agent == "null" else []
     if approved_by_null:
         print("\n!!! FAIL-OPEN: the null agent was approved on %s. Fix these "

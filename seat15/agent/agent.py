@@ -466,7 +466,12 @@ def make_harness_agent(policy_factory):
         # Findings are the one write this agent makes; the runner hands it a
         # read-only client, so open a narrowly-scoped writing one here.
         from seat15.harness.client import Client
-        writer = Client(client.instance, allow_writes=True)
+        from seat15.harness.fake import FakeClient
+        if task.get("fixture"):
+            writer = FakeClient(task["fixture"], client.instance,
+                                state_path=getattr(client, "state_path", None))
+        else:
+            writer = Client(client.instance, allow_writes=True)
         policy = policy_factory()
         policy.client = writer
         agent = Agent(writer, run_id, trace, policy)

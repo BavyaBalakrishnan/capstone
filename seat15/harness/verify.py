@@ -107,6 +107,8 @@ class VerifyContext(object):
 
     @property
     def trace(self):
+        if not self.run_dir:
+            return []          # no persisted run: a fixture or an in-memory check
         path = os.path.join(self.run_dir, "trace.jsonl")
         if not os.path.exists(path):
             return []

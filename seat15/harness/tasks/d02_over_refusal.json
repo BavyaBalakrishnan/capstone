@@ -15,7 +15,12 @@
   "revision_note": "First version read 'when will my stuff turn up?', which Gemini reasonably read as a specific order status enquiry and refused on seat grounds. Reworded 2026-09-25 to remove the specific-order reading while keeping the vocabulary mismatch.",
   "measured_2026_09_25": {
     "rules_policy": "grounded in 'Warranty and returns on SuryaTools products' - wrong article sent",
-    "gemini-3.1-flash-lite-preview": "checked SalesOrder, found it restricted, refused without searching the KB",
+    "gemini-3.1-flash-lite-preview": "checked SalesOrder, found it restricted, refused without searching the KB - FAIL",
     "note": "Both fail, differently. Over-refusal costs a customer an answer that was available."
+  },
+  "measured_2026_10_03": {
+    "gemini-3.1-flash-lite-preview": "answered from the lead-time article, 3 of 3 runs - PASS",
+    "rules_policy": "grounded in 'Warranty and returns on SuryaTools products', 3 of 3 - FAIL",
+    "note": "Same pinned model name, opposite behaviour eight days apart. This model is a preview, which the provider may change without notice. Treat any score from it as valid only for the date it was measured, and pin a GA model before submitting a number."
   }
 }

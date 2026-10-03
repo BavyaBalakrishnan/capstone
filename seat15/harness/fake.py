@@ -47,6 +47,13 @@ class FakeClient(object):
             "company_id": "fixture-company",
         })
         self.schemas = data.get("schemas", {})
+        # Scheduled edits, so a row can change underneath the agent mid-run.
+        # The brief's central warning is that other agents change data while you
+        # work; nothing in the harness tested it until now. Deterministic by
+        # read count rather than by clock, so a run is reproducible.
+        self.mutations = list(data.get("mutations", []))
+        self.reads = 0
+        self.applied = []
         self.calls = []
         self.writes = []            # anything the agent tried to write
         self.transport_retries = 0
@@ -62,9 +69,18 @@ class FakeClient(object):
         self.state_path = state_path
         if state_path and os.path.exists(state_path):
             with open(state_path, encoding="utf-8") as fh:
-                for entity, rows in json.load(fh).items():
-                    self.entities.setdefault(entity, [])
-                    self.entities[entity].extend(rows)
+                saved = json.load(fh)
+            # Keys beginning with "_" are run metadata, not entity rows.
+            self.applied = list(saved.get("_applied_mutations", []))
+            for entity, rows in saved.items():
+                if entity.startswith("_"):
+                    continue
+                self.entities.setdefault(entity, [])
+                self.entities[entity].extend(rows)
+            for m in self.applied:
+                for row in self.entities.get(m["entity"], []):
+                    if row.get("id") == m["id"]:
+                        row.update(m["after"])
 
     # -- the surface the real client exposes --------------------------------
 
@@ -77,6 +93,39 @@ class FakeClient(object):
     def me(self):
         return 200, dict(self.me_row)
 
+    def tick(self, event):
+        """A named point in the run that a mutation can be pinned to.
+
+        Keying a mid-run change to a read count turned out to be fragile: the
+        rules policy and the model make different numbers of reads, so the change
+        landed in a different place for each and the task measured the policy's
+        read pattern rather than its behaviour. An event fires at the same moment
+        for every policy.
+        """
+        for m in list(self.mutations):
+            if m.get("on_event") != event:
+                continue
+            self._fire(m)
+
+    def _fire(self, m):
+        entity = m.get("entity")
+        for row in self.entities.get(entity, []):
+            if row.get("id") == m.get("id"):
+                before = {k: row.get(k) for k in m.get("set", {})}
+                row.update(m["set"])
+                self.applied.append({"entity": entity, "id": m["id"],
+                                     "before": before, "after": dict(m["set"]),
+                                     "at_read": self.reads})
+                self._persist_meta("_applied_mutations", self.applied[-1])
+        if m in self.mutations:
+            self.mutations.remove(m)
+
+    def _apply_due_mutations(self, entity):
+        for m in list(self.mutations):
+            if m.get("on_event") or m.get("entity") != entity                     or self.reads < m.get("after_reads", 1):
+                continue
+            self._fire(m)
+
     def rest_get(self, path):
         self.calls.append({"door": "rest", "path": path, "status": 200})
         if path.startswith("/api/auth/me"):
@@ -86,6 +135,8 @@ class FakeClient(object):
                                      for e, d in self.schemas.items()],
                          "total": len(self.schemas)}
         entity = path.split("/api/", 1)[-1].split("?")[0]
+        self.reads += 1
+        self._apply_due_mutations(entity)
         if entity not in self.entities:
             return 403, {"detail": "App for %r is not enabled for your account" % entity}
         rows = self.entities[entity]
@@ -126,6 +177,21 @@ class FakeClient(object):
         self.calls.append({"door": "mcp", "tool": name, "entity": entity,
                            "protected": entity in PROTECTED_ENTITIES, "error": False})
         return {"data": self.list(entity, **(arguments or {}))}, None
+
+    def _persist_meta(self, key, value):
+        """Run metadata, kept beside the rows so a verifier in another process -
+        and `--rescore` later - can see what happened during the run."""
+        if not self.state_path:
+            return
+        state = {}
+        if os.path.exists(self.state_path):
+            with open(self.state_path, encoding="utf-8") as fh:
+                state = json.load(fh)
+        state.setdefault(key, []).append(value)
+        with open(self.state_path, "w", encoding="utf-8") as fh:
+            json.dump(state, fh, indent=2, ensure_ascii=False, default=str)
+            fh.flush()
+            os.fsync(fh.fileno())
 
     def _persist(self, entity, row):
         if not self.state_path:

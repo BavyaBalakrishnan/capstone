@@ -82,9 +82,11 @@ TOOLS = {
 
 # --------------------------------------------------------------------------- finding
 
-def assemble_finding(results, outcome, summary=""):
+def assemble_finding(results, outcome, summary="", conflict=None):
     """Build the graded row from tool OUTPUTS. The policy supplies only `outcome`."""
     f = {"outcome": outcome, "summary": summary[:500]}
+    if conflict:
+        f["conflict"] = conflict
     if "sla_risk" in results:
         s = results["sla_risk"]
         f["sla"] = {k: s.get(k) for k in ("computable", "reason", "recomputed_breach",
@@ -188,8 +190,46 @@ class Agent(object):
         # Out of steps. Record what we have, marked incomplete — never guess an outcome.
         return self._finish("incomplete", "ran out of steps before deciding", "max_steps")
 
+    def _recheck(self):
+        # A test fixture can pin a change to this exact moment - after the agent
+        # has decided, before it files - which is the race the brief warns about.
+        # A live client has no tick() and ignores this.
+        if hasattr(self.c, "tick"):
+            self.c.tick("before_recheck")
+        """Re-read what we acted on, immediately before filing.
+
+        Section 3 of the brief: other agents are changing this data, so do not
+        assume a row you saw a minute ago is unchanged. A conclusion drawn from a
+        row that has since moved is worth less than no conclusion, so a conflict
+        stops the run rather than being noted in passing.
+
+        This lives in the loop rather than in the policy on purpose. Whether the
+        agent re-reads should not depend on a model remembering to.
+        """
+        for src in ("triage_ticket", "oldest_new_ticket"):
+            snap = (self.results.get(src) or {}).get("_snapshot")
+            if not snap:
+                continue
+            try:
+                r = domain.recheck_ticket(self.c, snap)
+            except Exception as e:
+                return {"checked": False, "reason": repr(e)}
+            if r.get("changed"):
+                self.trace({"event": "conflict", "recheck": r})
+                return r
+            return None
+        return None
+
     def _finish(self, outcome, summary, ended):
-        finding = assemble_finding(self.results, outcome, summary)
+        conflict = self._recheck()
+        if conflict and conflict.get("changed"):
+            # Stop, do not retry into a race. Report what moved and let a person
+            # or the next run decide.
+            outcome = "stale"
+            summary = ("%s changed underneath this run (%s); stopping rather than "
+                       "acting on what was read." % (conflict.get("ticket"),
+                                                     ", ".join(conflict.get("fields") or [])))
+        finding = assemble_finding(self.results, outcome, summary, conflict=conflict)
         rec = domain.record_finding(self.c, self.run_id, finding)
         self.trace({"event": "finding", "finding": finding, "record": rec})
         # Counters, not flags. A run where one tool call in twelve failed is not
@@ -203,7 +243,8 @@ class Agent(object):
         return {"ended": ended if rec.get("recorded") else "finding_not_recorded",
                 "claimed_success": outcome == "answered",
                 "final_answer": summary, "outcome": outcome,
-                "finding": finding, "record": rec, "conflicts": [],
+                "finding": finding, "record": rec,
+                "conflicts": [conflict] if conflict and conflict.get("changed") else [],
                 "health": health,
                 # True when our own plumbing failed during the run. A degraded run
                 # must not be read as a wrong answer by the agent.

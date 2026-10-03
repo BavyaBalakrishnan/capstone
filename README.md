@@ -22,7 +22,7 @@ both are recorded rather than quietly dropped.
 
 | | | Status |
 |---|---|---|
-| 001 | App boundary not enforced for `sales` — 6 of 7 sales entities readable from a Helpdesk seat on **both** instances. Root cause now visible: `roles` carries `sales_viewer` while `allowed_apps` omits `sales` | **reproduces, and has widened** — the MCP catalogue now carries the sales entities too, so the door the write-up certified as refusing no longer does |
+| 001 | App boundary not enforced for `sales` — at its worst, 6 of 7 sales entities readable from a Helpdesk seat over all three doors. Root cause: `roles` carried `sales_viewer` while `allowed_apps` omitted `sales` | **FIXED 2026-10-03** — `sales_viewer` removed, all six now refuse on both instances. **`Item` is still readable and writable** and is in the same app. Four state changes in three weeks; the harness caught the fix itself, as *premise gone* |
 | 002 | `Ticket.tags` stored as a list where the schema declares `text`, crashing 70 of 100 ticket detail pages | **filed** — board S9, severity High, fixed |
 | 003 | `first_response_at` never recorded, so response-SLA breach is not computable; the stored flag tracks ticket status instead | **fixed on Keystone, still open on Suryodaya** (2026-09-21) — Keystone stamps 133/150 and computes breach correctly 150/150; Suryodaya stamps 1/103, leaving 24 breaches reported as compliant |
 | 004 | Agent dashboard reports $6,010,165 estimated cost against 19,100 tokens | written up — **not re-tested this pass** |

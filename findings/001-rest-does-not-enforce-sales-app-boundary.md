@@ -2,14 +2,70 @@
 
 **Seat:** 15 (Helpdesk) · team15@theschoolofai.in · `allowed_apps: support, agent, crm`
 **Instances:** BOTH Suryodaya and Keystone.
-**Door:** REST **and MCP** — see the status update below. The UI refuses.
+**Door:** REST, MCP and — by 2026-09-30 — the UI. All three, before the fix.
 **Severity:** cross-app read of the entire sales pipeline — named prospects, open
 deals, orders with pricing, call activities, internal notes. Read-only tested.
-**Reproduces:** every call.
+**Status: FIXED 2026-10-03** by removing `sales_viewer` from the seat's roles —
+the root cause this report named. **`Item` remains readable and writable** and is
+in the same app; see the status update. Four observed state changes in three
+weeks, each dated below, kept because the sequence is part of the finding.
 
 Supersedes the earlier narrower write-up, which attributed this to a spurious
 `viewer` role on Suryodaya. That explained only the MCP catalogue difference. The
 REST behaviour is present on both instances and is the real defect.
+
+## Status update — 2026-10-03: FIXED at the root, with one entity left open
+
+**`sales_viewer` has been removed from this seat's roles.** That was the root
+cause named in this report, and removing it closed every door at once:
+
+```
+/api/auth/me  roles: ['support_user', 'user', 'agent_user']     <- sales_viewer GONE
+              allowed_apps: ['support', 'agent', 'crm']          <- unchanged
+```
+
+| | 2026-09-30 | 2026-10-03 |
+|---|---|---|
+| REST | 6 of 7 served | **6 of 7 refused** |
+| MCP catalogue | carried the sales tools | **absent** — the seat's tool count fell 242 → 227 |
+| UI | showed a browsable "Sales & CRM" menu | — |
+
+The refusals now arrive through the **role** check — *"None of your roles
+['support_user', 'user', 'agent_user'] can 'read' on Deal"* — the mechanism this
+report documented as sound across three independent tests.
+
+**This is the right fix, and it is not the one attempted on 20 September.** That
+release added a per-entity role check to `SalesOrder`, patching one symptom with
+the working mechanism while five entities stayed exposed, and it was reverted
+within days. Removing the role that should never have been granted closes all of
+them and cannot regress entity by entity.
+
+### One entity is still open: `Item`
+
+```
+GET /api/Item   ->  HTTP 200, 104 rows on Suryodaya, 28 on Keystone
+MCP catalogue   ->  Item.create · Item.get · Item.list · Item.update
+```
+
+`Item` is `app = sales` in `/api/schemas`, exactly like the six that now refuse,
+and this seat still holds **write** tools for it. Rows carry `code`,
+`default_rate`, `default_bom_id`, `design_file_id` and the rest of the product
+master. Either `Item` is deliberately shared with every seat — in which case its
+app assignment is wrong — or the removal of `sales_viewer` missed a second grant.
+Worth asking rather than assuming.
+
+### How we found out
+
+Not by looking. The harness task `i02_refuse_sales_pipeline` checks its own
+premise before grading, and on 2026-10-03 it returned **unevaluated — "premise
+gone: sales entities are no longer readable"** on both instances, rather than
+failing the agent for a platform change or quietly passing.
+
+A two-verdict harness would have reported a mysterious regression that day. That
+third verdict was added precisely because these books move, and this is the fourth
+state change to this finding in three weeks.
+
+---
 
 ## Status update — 2026-09-25: fixed in part, then regressed
 

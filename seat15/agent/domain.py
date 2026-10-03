@@ -131,10 +131,46 @@ def _tno(t):
     return t.get("number") or t.get("ticket_number") or t.get("id")
 
 
+# The fields another agent is most likely to change while we are working, and the
+# ones a conclusion of ours would depend on. Section 3 of the brief: "do not assume
+# a row you saw a minute ago is unchanged".
+VOLATILE = ("status", "priority", "assigned_to", "updated_at", "response_count")
+
+
+def _snap(t):
+    """What the row looked like when we read it, so we can tell if it moved."""
+    snap = {"ticket": _tno(t)}
+    snap.update({f: t.get(f) for f in VOLATILE})
+    return snap
+
+
 def _brief(t):
     return {"ticket": _tno(t), "subject": t.get("subject"), "status": t.get("status"),
             "type": t.get("type"), "priority": t.get("priority"),
-            "party": t.get("_party_id_display"), "created_at": t.get("created_at")}
+            "party": t.get("_party_id_display"), "created_at": t.get("created_at"),
+            "_snapshot": _snap(t)}
+
+
+def recheck_ticket(client, snapshot):
+    """Re-read a ticket and report what moved since the snapshot was taken.
+
+    The agent calls this before filing, not after deciding, because a conclusion
+    drawn from a row that has since changed is worth less than no conclusion. If
+    the ticket has vanished entirely that is also a change, and a loud one.
+    """
+    if not snapshot or not snapshot.get("ticket"):
+        return {"checked": False, "reason": "no snapshot to compare against"}
+    now = get_ticket(client, snapshot["ticket"])
+    if not now:
+        return {"checked": True, "changed": True, "gone": True,
+                "ticket": snapshot["ticket"],
+                "fields": sorted(VOLATILE), "before": dict(snapshot), "after": None}
+    fresh = _snap(now)
+    moved = [f for f in VOLATILE if snapshot.get(f) != fresh.get(f)]
+    return {"checked": True, "changed": bool(moved), "gone": False,
+            "ticket": snapshot["ticket"], "fields": moved,
+            "before": {f: snapshot.get(f) for f in moved},
+            "after": {f: fresh.get(f) for f in moved}}
 
 
 def oldest_new_ticket(client):
@@ -167,6 +203,11 @@ def triage_ticket(client, ref):
     t = get_ticket(client, ref)
     if not t:
         return {"error": "no ticket %r" % ref}
+    # Snapshot the instant the row is read. Found 2026-10-03: this was taken at
+    # the end of the function, after a second read, so anything that changed in
+    # between was already baked into the "before" picture and the recheck saw
+    # nothing. A snapshot taken after further work is not a snapshot.
+    snap = _snap(t)
     party = t.get("party_id")
     open_same_party = [x for x in list_tickets(client)
                        if party and x.get("party_id") == party
@@ -175,7 +216,8 @@ def triage_ticket(client, ref):
             "subject": t.get("subject"), "type": t.get("type"),
             "priority": t.get("priority"), "status": t.get("status"),
             "channel": t.get("channel"),
-            "repeat_customer_open_tickets": len(open_same_party)}
+            "repeat_customer_open_tickets": len(open_same_party),
+            "_snapshot": snap}
 
 
 # --------------------------------------------------------------------------- sla

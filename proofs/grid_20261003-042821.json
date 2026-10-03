@@ -1,0 +1,43 @@
+{
+  "written_at": "2026-10-03T04:28:21.958181Z",
+  "repeat": 3,
+  "arms": [
+    {
+      "arm": "rules",
+      "agent": "rules",
+      "about": "no model. A fixed procedure over the same ten tools.",
+      "env": {},
+      "model": null,
+      "stamp": "20261003-042536-rules"
+    },
+    {
+      "arm": "llm",
+      "agent": "llm",
+      "about": "a model chooses tools and the outcome.",
+      "env": {},
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-042621-llm"
+    }
+  ],
+  "tasks": [
+    {
+      "task": "i05_stale_article_not_sent",
+      "instance": "suryodaya",
+      "arms": {
+        "rules": {
+          "pass_rate": 1.0,
+          "approved": 3,
+          "judged": 3
+        },
+        "llm": {
+          "pass_rate": 1.0,
+          "approved": 3,
+          "judged": 3
+        }
+      },
+      "separates": false
+    }
+  ],
+  "separating": [],
+  "note": "Verdict reasons are omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/."
+}

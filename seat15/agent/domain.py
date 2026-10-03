@@ -347,6 +347,32 @@ STOPWORDS = {
     "using", "what", "when", "which", "with", "would", "your", "complaint", "reply",
 }
 
+# GD_Week2 S4. Three bands, because "rated badly" and "not rated yet" are
+# different things and the old two-band test treated them the same - on Keystone
+# that let 11 articles with zero votes through as freely usable.
+#
+# The vote floor is not a significance test and should not be described as one.
+# With no vote records behind the counters, and `KBArticle.create` accepting them
+# as caller-supplied values (findings/007), more votes do not make a number more
+# trustworthy. They only make it less likely to have come from one incident.
+MIN_VOTES = 10
+BLOCK_BELOW = 0.50
+PREFER_AT = 0.70
+
+
+def rating_band(helpful, unhelpful):
+    """blocked | preferred | unproven, from the only quality signal we have."""
+    votes = (helpful or 0) + (unhelpful or 0)
+    if votes < MIN_VOTES:
+        return "unproven"
+    share = (helpful or 0) / float(votes)
+    if share < BLOCK_BELOW:
+        return "blocked"
+    if share >= PREFER_AT:
+        return "preferred"
+    return "unproven"
+
+
 def kb_candidates(client, query):
     """Articles matching `query`, each labelled with whether it may be SENT.
 
@@ -366,10 +392,11 @@ def kb_candidates(client, query):
         helpful = a.get("helpful_count") or 0
         unhelpful = a.get("not_helpful_count") or 0
         sendable = a.get("status") == "published" and a.get("visibility") == "public"
+        band = rating_band(helpful, unhelpful)
         out.append({"id": a.get("id"), "title": a.get("title"),
                     "status": a.get("status"), "visibility": a.get("visibility"),
                     "sendable": sendable, "helpful": helpful, "not_helpful": unhelpful,
-                    "badly_rated": unhelpful > helpful, "matched": hits,
+                    "band": band, "badly_rated": band == "blocked", "matched": hits,
                     "score": sum(weights[w] for w in hits)})
     out.sort(key=lambda x: (-x["score"], -x["helpful"]))
     # Only the BEST matches are candidates. Found 2026-09-21 by the harness (i04):
@@ -378,12 +405,41 @@ def kb_candidates(client, query):
     # the correct move is to say so — not to substitute a weaker match because it
     # happens to be sendable.
     best = out[0]["score"] if out else 0
-    usable = [x for x in out if x["score"] == best
-              and x["sendable"] and not x["badly_rated"]]
-    flag = [x["id"] for x in out if x["sendable"] and x["badly_rated"]]
+    top_match = [x for x in out if x["score"] == best and x["sendable"]]
+    # Preferred first; fall back to unproven only when nothing proven matches as
+    # well. GD_Week2 S4. An unproven article is not a bad one - it is one nobody
+    # has rated, and on Keystone that is 13 of 25 sendable articles. The old
+    # two-band test let those through as freely usable, which is what S4 was
+    # written to prevent.
+    preferred = [x for x in top_match if x["band"] == "preferred"]
+    unproven = [x for x in top_match if x["band"] == "unproven"]
+    usable = preferred or unproven
+    flag = [x["id"] for x in out if x["sendable"] and x["band"] == "blocked"]
+    # The refusal code is computed here rather than in draft_reply, because the
+    # agent may conclude from either. Found 2026-10-03: the model looked at
+    # candidates and decided, the rules policy went through draft_reply, and only
+    # the second produced a code - so the model failed three refusal tasks for
+    # taking a reasonable path.
+    if usable:
+        code, why = None, None
+    elif not out:
+        code, why = "no_coverage", "nothing in the knowledge base matches %r" % query
+    elif any(a["sendable"] and a["badly_rated"] for a in out):
+        best = out[0]
+        code, why = ("badly_rated",
+                     "the best sendable match is rated %s helpful / %s not helpful"
+                     % (best["helpful"], best["not_helpful"]))
+    else:
+        code, why = ("not_publishable",
+                     "%d article(s) answer this; none is both published and public"
+                     % len(out))
     return {"query": query, "matches": len(out), "usable": usable[:5],
             "sendable_count": len(usable), "flag_for_review": flag,
-            "top": out[:5]}
+            # True when the only thing we can offer is an article nobody has
+            # rated. The draft must say so; a reviewer deserves to know the
+            # source is unproven rather than endorsed.
+            "source_unproven": bool(usable) and not preferred,
+            "refusal_reason": code, "reason": why, "top": out[:5]}
 
 
 def draft_reply(client, ticket_ref, query):
@@ -395,20 +451,9 @@ def draft_reply(client, ticket_ref, query):
         # Three refusals that mean different things to whoever picks this up:
         # a publishing problem, a content-quality problem, and a coverage gap.
         # Collapsing them into one sentence loses the only actionable part.
-        best = kb["top"][0] if kb["top"] else None
-        if not kb["matches"]:
-            code, why = "no_coverage", "nothing in the knowledge base matches %r" % query
-        elif any(a["sendable"] and a["badly_rated"] for a in kb["top"]):
-            code, why = ("badly_rated",
-                         "the best sendable match is rated %s helpful / %s not helpful"
-                         % (best["helpful"], best["not_helpful"]) if best else "")
-        else:
-            code, why = ("not_publishable",
-                         "%d article(s) answer this; none is both published and public"
-                         % kb["matches"])
         return {"drafted": False, "sendable": False, "grounded_article_ids": [],
                 "flag_for_review": kb["flag_for_review"],
-                "refusal_reason": code, "reason": why}
+                "refusal_reason": kb.get("refusal_reason"), "reason": kb.get("reason")}
     best = kb["usable"][0]
     return {"drafted": True, "sendable": True,
             "grounded_article_ids": [best["id"]],

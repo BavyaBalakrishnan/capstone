@@ -29,6 +29,26 @@ HOSTS = {
 WRITABLE = ("AgentMemory", "AgentMessage", "AgentSkill", "AgentTodo", "AgentTask")
 
 READ_SUFFIXES = (".list", ".get", ".search", ".count", ".schema")
+
+# Read-only tools whose names do not end in a read suffix. Each is named here
+# because its own description says Read-only, or because it plainly reads - not
+# because the prefix looked safe. `endpoint.*` as a class would be wrong:
+# deliver_reply, assign_ticket, escalations.raise and storefront.checkout all
+# live under it and all write.
+#
+# Found 2026-10-03: without this, preflight could never read the platform's own
+# kill switch, so the check that is meant to stop a run before it spends anything
+# silently reported "limits unreadable" on every live run.
+READ_TOOLS = (
+    "AgentPersona.daily_limits",
+    "endpoint.helpdesk.assist_suggestions",
+    "endpoint.helpdesk.reply_delivery",
+    "endpoint.helpdesk.assignment_queue",
+    "endpoint.agent_governance.escalations",
+    "endpoint.agent_governance.privacy",
+    "tools.search",
+    "tools.describe",
+)
 WRITE_SUFFIXES = (".create", ".update")
 
 # Readable from this seat today only because of findings/001: `roles` carries
@@ -178,7 +198,7 @@ class Client(object):
     # -- the guard ----------------------------------------------------------
 
     def _guard(self, name):
-        if name.endswith(READ_SUFFIXES):
+        if name.endswith(READ_SUFFIXES) or name in READ_TOOLS:
             return
         if name.endswith(WRITE_SUFFIXES):
             entity = name.split(".")[0]

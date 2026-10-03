@@ -1,0 +1,77 @@
+{
+  "written_at": "2026-10-03T04:18:16.547899Z",
+  "repeat": 1,
+  "arms": [
+    {
+      "arm": "rules",
+      "agent": "rules",
+      "about": "no model. A fixed procedure over the same ten tools.",
+      "env": {},
+      "model": null,
+      "stamp": "20261003-041737-rules"
+    },
+    {
+      "arm": "llm",
+      "agent": "llm",
+      "about": "a model chooses tools and the outcome.",
+      "env": {},
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-041739-llm"
+    }
+  ],
+  "tasks": [
+    {
+      "task": "r01_refusal_not_publishable",
+      "instance": "fixture",
+      "arms": {
+        "rules": {
+          "pass_rate": 1.0,
+          "approved": 1,
+          "judged": 1
+        },
+        "llm": {
+          "pass_rate": 1.0,
+          "approved": 1,
+          "judged": 1
+        }
+      },
+      "separates": false
+    },
+    {
+      "task": "r02_refusal_badly_rated",
+      "instance": "fixture",
+      "arms": {
+        "rules": {
+          "pass_rate": 1.0,
+          "approved": 1,
+          "judged": 1
+        },
+        "llm": {
+          "pass_rate": 1.0,
+          "approved": 1,
+          "judged": 1
+        }
+      },
+      "separates": false
+    },
+    {
+      "task": "r03_refusal_no_coverage",
+      "instance": "fixture",
+      "arms": {
+        "rules": {
+          "pass_rate": 1.0,
+          "approved": 1,
+          "judged": 1
+        },
+        "llm": {
+          "pass_rate": 1.0,
+          "approved": 1,
+          "judged": 1
+        }
+      },
+      "separates": false
+    }
+  ],
+  "separating": [],
+  "note": "Verdict reasons are omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/."
+}

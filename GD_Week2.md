@@ -1,7 +1,7 @@
 # GD_Week2 — Helpdesk agent scope
 
 **Team 15 · Seat 15 (Helpdesk) · Suryodaya (India) and Keystone (US)**
-**Prepared 2026-09-23, extended 2026-09-25. For group discussion — eight decisions needed.**
+**Prepared 2026-09-23, extended 2026-09-25. Q1, Q4 and Q8 answered 2026-10-03.**
 
 This is the agenda for settling what the Helpdesk agent does, before more of it is
 built. Every figure below was measured read-only against the live books between
@@ -131,6 +131,12 @@ significant".
 
 ## 4. Open question 1 — what goes in a drafted reply?
 
+> **ANSWERED 2026-10-03: option A — a full reply.** Greeting, the answer written
+> from the article, sign-off, and a provenance line for the reviewer. The harness
+> must then verify that a draft cites only a sendable, non-blocked article, which
+> `g01_grounding_honesty` already does.
+
+
 | option | for | against |
 |---|---|---|
 | **A. Full reply + provenance line.** Greeting, the answer written from the article, sign-off, and a reviewer line: *"Source: <article>, rated 96 helpful / 8 not helpful; rating provenance not recorded by the platform."* | A human can send it after a glance, and knows exactly how much to trust it. Satisfies the brief's word "draft" | The model writes customer-facing prose, so it could misstate the article |
@@ -174,6 +180,14 @@ that impossible to ignore.
 ---
 
 ## 6a. Open question 4 — which tickets does a run cover?
+
+> **ANSWERED 2026-10-03: status `new` only.** 21 tickets on Suryodaya, 8 on
+> Keystone. This is narrower than the measurement below argues for, and it is a
+> deliberate starting point rather than a disagreement with it: the 55 live
+> tickets that have never been answered but sit in `open` or `in_progress` are out
+> of scope for now. Worth revisiting once the queue walk works, because the
+> finding should still say how many tickets were in scope and how many were not.
+
 
 Settled item S1 says "all tickets in `new`". Measurement on 2026-09-25 shows that
 is the wrong boundary.

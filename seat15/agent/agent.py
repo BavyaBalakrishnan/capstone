@@ -41,7 +41,15 @@ TOOLS = {
     "preflight": {
         "fn": lambda a, c: domain.preflight(c),
         "args": {},
-        "about": "is this agent switched on and in budget? Call before anything else."},
+        # Not advertised to the model. The loop runs it before anything else, so a
+        # policy never needs to call it - and on 2026-10-03 a one-variable grid
+        # showed that merely LISTING it cost the model both discriminating tasks:
+        # 0/3 with it advertised, 3/3 with it hidden, the loop running it either
+        # way. A tool about permissions and budget at the top of the list primes a
+        # model toward refusing. Tools the model cannot usefully choose should not
+        # be offered to it.
+        "advertised": False,
+        "about": "is this agent switched on and in budget? Run by the loop, not chosen."},
     "seat_context": {
         "fn": lambda a, c: domain.seat_context(c),
         "args": {}, "about": "who am I: instance, roles, allowed_apps. Call first."},
@@ -114,7 +122,8 @@ def assemble_finding(results, outcome, summary="", conflict=None):
         f["flagged_for_review"] = r.get("flag_for_review") or []
     elif "kb_candidates" in results:
         k = results["kb_candidates"]
-        f["reply"] = {"drafted": False, "sendable": False, "grounded_article_ids": []}
+        f["reply"] = {"drafted": False, "sendable": False, "grounded_article_ids": [],
+                      "refusal_reason": k.get("refusal_reason"), "reason": k.get("reason")}
         f["flagged_for_review"] = k.get("flag_for_review") or []
     if "preflight" in results:
         p = results["preflight"]
@@ -433,8 +442,18 @@ class LLMPolicy(object):
             raise RuntimeError(
                 "LLMPolicy needs SEAT15_LLM_BASE_URL and SEAT15_LLM_MODEL. "
                 "No model is configured on this machine yet.")
-        spec = "\n".join("- %s(%s): %s" % (n, ", ".join("%s: %s" % kv for kv in t["args"].items()),
-                                            t["about"]) for n, t in TOOLS.items())
+        # A tool can be hidden from the advertised list while the loop still uses
+        # it. Added 2026-10-03 to test one variable: the model passed the
+        # discriminating pair 5 of 5 before `preflight` joined the list and 0 of 6
+        # after, and drift on a preview model is the other candidate. The only way
+        # to tell them apart is to move exactly one thing.
+        hidden = {h.strip() for h in (get("SEAT15_HIDE_TOOLS") or "").split(",") if h.strip()}
+        self.hidden_tools = sorted(hidden)
+        spec = chr(10).join("- %s(%s): %s"
+                            % (n, ", ".join("%s: %s" % kv for kv in t["args"].items()),
+                               t["about"])
+                            for n, t in TOOLS.items()
+                          if n not in hidden and t.get("advertised", True))
         self.system = SYSTEM + spec
 
     def next(self, prompt, history, results, steps_left):

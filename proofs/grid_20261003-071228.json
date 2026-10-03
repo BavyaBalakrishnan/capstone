@@ -1,0 +1,65 @@
+{
+  "written_at": "2026-10-03T07:12:28.732104Z",
+  "repeat": 3,
+  "arms": [
+    {
+      "arm": "llm",
+      "agent": "llm",
+      "about": "a model chooses tools and the outcome.",
+      "env": {},
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-070653-llm"
+    },
+    {
+      "arm": "llm_nopreflight",
+      "agent": "llm",
+      "about": "the same model with `preflight` hidden from the advertised tool list. The loop still runs it; only what the model is told about changes.",
+      "env": {
+        "SEAT15_HIDE_TOOLS": "preflight"
+      },
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-070939-llm_nopreflight"
+    }
+  ],
+  "tasks": [
+    {
+      "task": "d01_paraphrase_lead_time",
+      "instance": "suryodaya",
+      "arms": {
+        "llm": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        },
+        "llm_nopreflight": {
+          "pass_rate": 1.0,
+          "approved": 3,
+          "judged": 3
+        }
+      },
+      "separates": true
+    },
+    {
+      "task": "d02_over_refusal",
+      "instance": "suryodaya",
+      "arms": {
+        "llm": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        },
+        "llm_nopreflight": {
+          "pass_rate": 1.0,
+          "approved": 3,
+          "judged": 3
+        }
+      },
+      "separates": true
+    }
+  ],
+  "separating": [
+    "d01_paraphrase_lead_time",
+    "d02_over_refusal"
+  ],
+  "note": "Verdict reasons are omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/."
+}

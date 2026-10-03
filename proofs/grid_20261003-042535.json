@@ -1,0 +1,60 @@
+{
+  "written_at": "2026-10-03T04:25:35.651866Z",
+  "repeat": 3,
+  "arms": [
+    {
+      "arm": "rules",
+      "agent": "rules",
+      "about": "no model. A fixed procedure over the same ten tools.",
+      "env": {},
+      "model": null,
+      "stamp": "20261003-041836-rules"
+    },
+    {
+      "arm": "llm",
+      "agent": "llm",
+      "about": "a model chooses tools and the outcome.",
+      "env": {},
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-042003-llm"
+    }
+  ],
+  "tasks": [
+    {
+      "task": "d01_paraphrase_lead_time",
+      "instance": "suryodaya",
+      "arms": {
+        "rules": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        },
+        "llm": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        }
+      },
+      "separates": false
+    },
+    {
+      "task": "d02_over_refusal",
+      "instance": "suryodaya",
+      "arms": {
+        "rules": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        },
+        "llm": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        }
+      },
+      "separates": false
+    }
+  ],
+  "separating": [],
+  "note": "Verdict reasons are omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/."
+}

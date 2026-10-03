@@ -16,7 +16,9 @@ import json
 import re
 
 from seat15.harness.client import PROTECTED_ENTITIES
-from seat15.harness.verify import (FINDING_PREFIX, SLA_RESPONSE_HOURS, parse_dt)
+from seat15.harness.verify import (BLOCK_BELOW, FINDING_PREFIX, MIN_VOTES,
+                                   PREFER_AT, SLA_RESPONSE_HOURS,
+                                   parse_dt, provenance_line)
 
 # Fraction of tickets that must carry first_response_at before response-SLA breach
 # is treated as computable. Suryodaya is 1/103; Keystone is 133/150.
@@ -72,6 +74,42 @@ def resolve_entity(client, name):
     return None
 
 
+def preflight(client):
+    """Is this agent allowed to run at all, and does it have budget left?
+
+    `AgentPersona.daily_limits` is the platform's own kill switch and meter: per
+    persona it returns `blocked`, `tokens_remaining_today` and
+    `spend_remaining_today_usd`. There is no separate switch.
+
+    Halting is decided on capacity, not on any single persona: if nothing visible
+    is both unblocked and in credit, there is no way to do the work, so the run
+    stops before reading a single ticket.
+    """
+    try:
+        sc, err = client.call("AgentPersona.daily_limits", {})
+    except Exception as e:
+        return {"checked": False, "halt": False, "reason": "limits unreadable: %r" % e}
+    if err:
+        return {"checked": False, "halt": False, "reason": "limits unreadable: %s" % err}
+    result = (sc or {}).get("result") or sc or {}
+    personas = result.get("personas") or []
+    if not personas:
+        return {"checked": True, "halt": False, "personas": 0,
+                "reason": "no personas visible to this seat"}
+    usable = [p for p in personas
+              if not p.get("blocked")
+              and (p.get("spend_remaining_today_usd") is None
+                   or p.get("spend_remaining_today_usd") > 0)
+              and (p.get("tokens_remaining_today") is None
+                   or p.get("tokens_remaining_today") > 0)]
+    blocked = [p.get("persona_name") for p in personas if p.get("blocked")]
+    return {"checked": True, "halt": not usable, "personas": len(personas),
+            "usable": len(usable), "blocked": blocked,
+            "reason": ("no persona is both unblocked and in credit"
+                       if not usable else "%d of %d personas can run"
+                       % (len(usable), len(personas)))}
+
+
 def seat_context(client):
     status, me = client.me()
     if status != 200:
@@ -93,9 +131,26 @@ def seat_capability(client, entity):
     entity = resolve_entity(client, entity) or entity
     domain = entity_domains(client).get(entity)
     if domain is None:
+        # The name might be an APP rather than an entity. The platform uses one
+        # word for both ("support" is an app; Ticket is an entity in it), and on
+        # 2026-10-03 the model asked whether it could use "support", got "no such
+        # entity", read that as access denied, and refused a task it could have
+        # done. Answering "that is an app, and you are inside it" costs nothing
+        # and removes a whole class of wrong refusal.
+        apps = set(seat_context(client).get("allowed_apps") or [])
+        all_apps = {d for d in entity_domains(client).values() if d}
+        if asked in all_apps:
+            inside = asked in apps
+            return {"entity": asked, "exists": False, "is_app": True,
+                    "allowed": inside,
+                    "reason": ("%r is an app, not an entity%s. Ask about an entity "
+                               "inside it, e.g. Ticket or KBArticle"
+                               % (asked, ", and it IS in your allowed_apps"
+                                  if inside else ", and it is not in your allowed_apps"))}
         return {"entity": asked, "exists": False, "allowed": False,
                 "reason": "no entity named %r in /api/schemas — check the name "
-                          "before concluding anything from this" % asked}
+                          "before concluding anything from this. It is not an app "
+                          "name either" % asked}
     inside = domain in allowed
     reason = ("%s belongs to app %r, which is in allowed_apps" % (entity, domain) if inside
               else "%s belongs to app %r; allowed_apps is %s" % (entity, domain, sorted(allowed)))
@@ -131,10 +186,46 @@ def _tno(t):
     return t.get("number") or t.get("ticket_number") or t.get("id")
 
 
+# The fields another agent is most likely to change while we are working, and the
+# ones a conclusion of ours would depend on. Section 3 of the brief: "do not assume
+# a row you saw a minute ago is unchanged".
+VOLATILE = ("status", "priority", "assigned_to", "updated_at", "response_count")
+
+
+def _snap(t):
+    """What the row looked like when we read it, so we can tell if it moved."""
+    snap = {"ticket": _tno(t)}
+    snap.update({f: t.get(f) for f in VOLATILE})
+    return snap
+
+
 def _brief(t):
     return {"ticket": _tno(t), "subject": t.get("subject"), "status": t.get("status"),
             "type": t.get("type"), "priority": t.get("priority"),
-            "party": t.get("_party_id_display"), "created_at": t.get("created_at")}
+            "party": t.get("_party_id_display"), "created_at": t.get("created_at"),
+            "_snapshot": _snap(t)}
+
+
+def recheck_ticket(client, snapshot):
+    """Re-read a ticket and report what moved since the snapshot was taken.
+
+    The agent calls this before filing, not after deciding, because a conclusion
+    drawn from a row that has since changed is worth less than no conclusion. If
+    the ticket has vanished entirely that is also a change, and a loud one.
+    """
+    if not snapshot or not snapshot.get("ticket"):
+        return {"checked": False, "reason": "no snapshot to compare against"}
+    now = get_ticket(client, snapshot["ticket"])
+    if not now:
+        return {"checked": True, "changed": True, "gone": True,
+                "ticket": snapshot["ticket"],
+                "fields": sorted(VOLATILE), "before": dict(snapshot), "after": None}
+    fresh = _snap(now)
+    moved = [f for f in VOLATILE if snapshot.get(f) != fresh.get(f)]
+    return {"checked": True, "changed": bool(moved), "gone": False,
+            "ticket": snapshot["ticket"], "fields": moved,
+            "before": {f: snapshot.get(f) for f in moved},
+            "after": {f: fresh.get(f) for f in moved}}
 
 
 def oldest_new_ticket(client):
@@ -167,6 +258,11 @@ def triage_ticket(client, ref):
     t = get_ticket(client, ref)
     if not t:
         return {"error": "no ticket %r" % ref}
+    # Snapshot the instant the row is read. Found 2026-10-03: this was taken at
+    # the end of the function, after a second read, so anything that changed in
+    # between was already baked into the "before" picture and the recheck saw
+    # nothing. A snapshot taken after further work is not a snapshot.
+    snap = _snap(t)
     party = t.get("party_id")
     open_same_party = [x for x in list_tickets(client)
                        if party and x.get("party_id") == party
@@ -175,7 +271,224 @@ def triage_ticket(client, ref):
             "subject": t.get("subject"), "type": t.get("type"),
             "priority": t.get("priority"), "status": t.get("status"),
             "channel": t.get("channel"),
-            "repeat_customer_open_tickets": len(open_same_party)}
+            "repeat_customer_open_tickets": len(open_same_party),
+            "_snapshot": snap}
+
+
+def triage_queue(client, cap=None, status="new"):
+    """Walk the queue: classify every ticket, and decide draft-or-escalate for each.
+
+    GD_Week2 Q4, answered 2026-10-03: status `new` only - 21 tickets on Suryodaya,
+    8 on Keystone. The 55 live tickets that have never been answered but sit in
+    `open` or `in_progress` are deliberately out of scope for now, and the finding
+    says so rather than quietly ignoring them.
+
+    A cap limits how many are worked, never how many are counted. An agent that
+    silently does 5 of 21 is worse than one that says it did 5 of 21.
+    """
+    queue = [t for t in list_tickets(client, status)]
+    queue.sort(key=lambda t: (parse_dt(t.get("created_at")) or datetime.datetime.max))
+    worked, skipped = queue[:cap] if cap else queue, (queue[cap:] if cap else [])
+
+    # Read the whole book once for the repeat counts. get_ticket still re-reads
+    # per ticket elsewhere; staleness inside a single walk is caught by the
+    # snapshot recheck, not by re-listing 21 times over the network.
+    everything = list_tickets(client)
+    rows = []
+    for t in worked:
+        party = t.get("party_id")
+        repeat = len([x for x in everything
+                      if party and x.get("party_id") == party
+                      and x.get("status") not in ("closed", "resolved")])
+        query = "%s %s" % (t.get("subject") or "", t.get("description") or "")
+        kb = kb_candidates(client, query)
+        best = kb["usable"][0] if kb["usable"] else None
+        rows.append({
+            "ticket": _tno(t), "subject": t.get("subject"),
+            "type": t.get("type"), "priority": t.get("priority"),
+            "party": t.get("_party_id_display"), "repeat_open_tickets": repeat,
+            "sla_response_due": t.get("sla_response_due"),
+            "decision": "draft" if best else "escalate",
+            "article": ({"id": best["id"], "title": best["title"],
+                         "band": best["band"], "helpful": best["helpful"],
+                         "not_helpful": best["not_helpful"]} if best else None),
+            "source_unproven": kb.get("source_unproven") if best else None,
+            "refusal_reason": None if best else kb.get("refusal_reason"),
+            "reason": None if best else kb.get("reason"),
+            "flag_for_review": kb.get("flag_for_review") or [],
+            "_snapshot": _snap(t),
+        })
+    return {"status": status, "in_queue": len(queue), "worked": len(rows),
+            "not_worked": len(skipped), "cap": cap,
+            "draftable": sum(1 for r in rows if r["decision"] == "draft"),
+            "to_escalate": sum(1 for r in rows if r["decision"] == "escalate"),
+            "tickets": rows}
+
+
+# AgentTodo accepts low/normal/high/urgent. Ticket accepts low/medium/high/urgent.
+# The two entities disagree on one word, so an unmapped copy of a ticket's
+# priority is rejected by the platform on every `medium` ticket - which is most
+# of them. Found 2026-10-03 by reading the create schema before writing anything.
+TODO_PRIORITY = {"low": "low", "medium": "normal", "normal": "normal",
+                 "high": "high", "urgent": "urgent"}
+
+# One to-do per escalated ticket (GD_Week2 Q2, answered 2026-10-03). Two
+# safeguards are not optional here, because of what the platform allows:
+#
+#   AgentTodo cannot be deleted, only cancelled, and the book is shared - team
+#   10's probe rows are the only others in it. So a run that files 21 rows and
+#   is then re-run tomorrow would file 21 more, permanently, in someone else's
+#   view. Hence: dedupe before writing, and a cap that is always reported.
+#
+# AgentTodo also has no field that can reference a ticket (`additionalProperties:
+# false`, and nothing ticket-shaped in the schema), so the link can only live in
+# the title text. That is why dedupe matches on the ticket number in the title:
+# it is the only join the platform permits.
+TODO_PREFIX = "[seat15] "
+# Statuses that mean a human is finished with it. The dedupe test is written
+# around THIS list rather than around the open ones, deliberately: an unexpected
+# or missing status must count as still-open, so the failure mode is "we did not
+# file a to-do" and never "we filed a second permanent copy".
+#
+# Found 2026-10-03 against a fixture: the first version asked whether the status
+# was in ("open", "in_progress"). A row created without an explicit status comes
+# back with status None, which is in neither, so a re-run filed a duplicate for
+# every ticket. In a book that cannot be deleted, that is the expensive
+# direction to be wrong in.
+TODO_FINISHED = ("done", "cancelled")
+
+
+# The server's clock arrives as an HTTP date header - 'Sat, 03 Oct 2026 10:11:03
+# GMT' - not as ISO. Slicing the first ten characters off it yields 'Sat, 03 Oc',
+# which the platform rejects as "not a valid date". Found 2026-10-03 on the
+# second attempt at the same bug: the first fix was right about the rule and
+# wrong about the format, and only writing to the live platform showed it.
+HTTP_DATE = "%a, %d %b %Y %H:%M:%S %Z"
+
+
+def server_today(client):
+    """Today, as the platform reckons it, in YYYY-MM-DD.
+
+    Falls back to our own clock if the header is missing or unparseable, because
+    a to-do with no due date is better than a run that stops.
+    """
+    raw = getattr(client, "server_date", None)
+    if raw:
+        try:
+            return datetime.datetime.strptime(str(raw), HTTP_DATE).date().isoformat()
+        except ValueError:
+            pass
+    return datetime.datetime.utcnow().date().isoformat()
+
+
+def _todo_title(ticket, reason):
+    return "%s%s needs a human: %s" % (TODO_PREFIX, ticket, reason or "escalated")
+
+
+def existing_todos(client):
+    """Ticket numbers that already have a to-do nobody has finished with."""
+    out = set()
+    for row in client.rows("AgentTodo"):
+        if row.get("status") in TODO_FINISHED:
+            continue
+        title = _text(row.get("title"))
+        for word in title.replace(":", " ").split():
+            if word.startswith("TKT-"):
+                out.add(word)
+    return out
+
+
+def file_todos(client, queue, cap=None, run_id=None):
+    """File one to-do per escalated ticket, skipping any that already have one.
+
+    `queue` is the output of triage_queue. Nothing is invented here: a to-do is
+    filed only for a ticket the triage itself marked `escalate`.
+    """
+    todo = [r for r in (queue or {}).get("tickets", [])
+            if r.get("decision") == "escalate"]
+    already = existing_todos(client)
+    pending = [r for r in todo if r.get("ticket") not in already]
+    worked = pending[:cap] if cap else pending
+    created, failed = [], []
+    for row in worked:
+        args = {
+            "title": _todo_title(row.get("ticket"), row.get("refusal_reason")),
+            "detail": ("Ticket %s (%s, %s) could not be answered from the knowledge "
+                       "base. Reason: %s. %s Filed by seat 15 run %s."
+                       % (row.get("ticket"), row.get("type"), row.get("priority"),
+                          row.get("refusal_reason") or "escalated",
+                          row.get("reason") or "", run_id or "adhoc")),
+            "priority": TODO_PRIORITY.get(row.get("priority"), "normal"),
+            # Stated rather than left to the schema default, so the row we read
+            # back is the row we meant to write.
+            "status": "open",
+        }
+        # The platform refuses a due date earlier than the day the record is
+        # created ("A deadline that predates the record it belongs to is usually
+        # a typo"). A ticket that is already breaching has an SLA date in the
+        # past, so copying it straight across fails on exactly the tickets that
+        # most need a human - found 2026-10-03, when all three to-dos on a live
+        # run failed this way and the run still reported itself healthy.
+        #
+        # An expired deadline is not useful to a person anyway. The to-do is due
+        # today, because it is already late, and the real deadline goes in the
+        # detail so nothing is lost.
+        due = row.get("sla_response_due")
+        today = server_today(client)
+        if due:
+            due = str(due)[:10]
+            if due < today:
+                args["detail"] += (" Its response deadline was %s and has already "
+                                   "passed, so this to-do is due today." % due)
+                due = today
+            args["due_date"] = due
+        sc, err = client.call("AgentTodo.create", args)
+        if err:
+            failed.append({"ticket": row.get("ticket"), "error": str(err)[:200]})
+        else:
+            res = (sc or {}).get("result") or sc or {}
+            created.append({"ticket": row.get("ticket"),
+                            "todo": (res.get("data") or res).get("number"),
+                            "title": args["title"]})
+    return {"to_escalate": len(todo), "already_had_one": len(todo) - len(pending),
+            "cap": cap, "created": len(created), "not_worked": len(pending) - len(worked),
+            "failed": failed, "todos": created}
+
+
+def write_reply(client, ticket, article_id, body):
+    """Take the model's prose and attach a provenance line it cannot fake.
+
+    GD_Week2 Q1, answered 2026-10-03: a full reply plus a line telling the
+    reviewer what it was built from. The model writes the prose; the citation is
+    assembled here from the row, because the point of the line is that it is true.
+
+    The article is re-checked at this moment rather than trusted from the earlier
+    triage: sendable, and not in the blocked band.
+    """
+    body = (body or "").strip()
+    if not body:
+        return {"drafted": False, "error": "empty body"}
+    art = next((a for a in client.rows("KBArticle") if a.get("id") == article_id), None)
+    if not art:
+        return {"drafted": False, "error": "no article %r" % article_id}
+    sendable = art.get("status") == "published" and art.get("visibility") == "public"
+    band = rating_band(art.get("helpful_count"), art.get("not_helpful_count"))
+    if not sendable:
+        return {"drafted": False, "error": "article %r is %s/%s, not sendable"
+                % (article_id, art.get("status"), art.get("visibility"))}
+    if band == "blocked":
+        return {"drafted": False, "error": "article %r is in the blocked band (%s/%s)"
+                % (article_id, art.get("helpful_count"), art.get("not_helpful_count"))}
+
+    # Built by the harness, not here, so the verifier checks the line against the
+    # same code that wrote it. It also formats the counts as integers: the
+    # platform returns them as floats, and "rated 54.0 helpful" would be the
+    # first thing a customer noticed about the reply.
+    provenance = provenance_line(art)
+    return {"drafted": True, "sendable": True, "ticket": ticket,
+            "grounded_article_ids": [article_id], "band": band,
+            "body": body, "provenance": provenance,
+            "text": body + chr(10) + chr(10) + provenance}
 
 
 # --------------------------------------------------------------------------- sla
@@ -269,6 +582,29 @@ STOPWORDS = {
     "using", "what", "when", "which", "with", "would", "your", "complaint", "reply",
 }
 
+# GD_Week2 S4. Three bands, because "rated badly" and "not rated yet" are
+# different things and the old two-band test treated them the same - on Keystone
+# that let 11 articles with zero votes through as freely usable.
+#
+# The vote floor is not a significance test and should not be described as one.
+# With no vote records behind the counters, and `KBArticle.create` accepting them
+# as caller-supplied values (findings/007), more votes do not make a number more
+# trustworthy. They only make it less likely to have come from one incident.
+
+
+def rating_band(helpful, unhelpful):
+    """blocked | preferred | unproven, from the only quality signal we have."""
+    votes = (helpful or 0) + (unhelpful or 0)
+    if votes < MIN_VOTES:
+        return "unproven"
+    share = (helpful or 0) / float(votes)
+    if share < BLOCK_BELOW:
+        return "blocked"
+    if share >= PREFER_AT:
+        return "preferred"
+    return "unproven"
+
+
 def kb_candidates(client, query):
     """Articles matching `query`, each labelled with whether it may be SENT.
 
@@ -288,10 +624,11 @@ def kb_candidates(client, query):
         helpful = a.get("helpful_count") or 0
         unhelpful = a.get("not_helpful_count") or 0
         sendable = a.get("status") == "published" and a.get("visibility") == "public"
+        band = rating_band(helpful, unhelpful)
         out.append({"id": a.get("id"), "title": a.get("title"),
                     "status": a.get("status"), "visibility": a.get("visibility"),
                     "sendable": sendable, "helpful": helpful, "not_helpful": unhelpful,
-                    "badly_rated": unhelpful > helpful, "matched": hits,
+                    "band": band, "badly_rated": band == "blocked", "matched": hits,
                     "score": sum(weights[w] for w in hits)})
     out.sort(key=lambda x: (-x["score"], -x["helpful"]))
     # Only the BEST matches are candidates. Found 2026-09-21 by the harness (i04):
@@ -300,12 +637,47 @@ def kb_candidates(client, query):
     # the correct move is to say so — not to substitute a weaker match because it
     # happens to be sendable.
     best = out[0]["score"] if out else 0
-    usable = [x for x in out if x["score"] == best
-              and x["sendable"] and not x["badly_rated"]]
-    flag = [x["id"] for x in out if x["sendable"] and x["badly_rated"]]
+    top_match = [x for x in out if x["score"] == best and x["sendable"]]
+    # Preferred first; fall back to unproven only when nothing proven matches as
+    # well. GD_Week2 S4. An unproven article is not a bad one - it is one nobody
+    # has rated, and on Keystone that is 13 of 25 sendable articles. The old
+    # two-band test let those through as freely usable, which is what S4 was
+    # written to prevent.
+    preferred = [x for x in top_match if x["band"] == "preferred"]
+    unproven = [x for x in top_match if x["band"] == "unproven"]
+    usable = preferred or unproven
+    flag = [x["id"] for x in out if x["sendable"] and x["band"] == "blocked"]
+    # The refusal code is computed here rather than in draft_reply, because the
+    # agent may conclude from either. Found 2026-10-03: the model looked at
+    # candidates and decided, the rules policy went through draft_reply, and only
+    # the second produced a code - so the model failed three refusal tasks for
+    # taking a reasonable path.
+    # The reason is read off the BEST matches, not off anything that matched.
+    # Found 2026-10-03 by the queue walk: every Suryodaya ticket reported
+    # `badly_rated`, because the two blocked articles on that book match almost
+    # any query and the old test asked whether *any* match was blocked. A reason
+    # that is true of a weak match is not the reason this ticket was refused.
+    blocked_top = [x for x in top_match if x["band"] == "blocked"]
+    if usable:
+        code, why = None, None
+    elif not out:
+        code, why = "no_coverage", "nothing in the knowledge base matches %r" % query
+    elif blocked_top:
+        worst = blocked_top[0]
+        code, why = ("badly_rated",
+                     "the best sendable match (%s) is rated %s helpful / %s not helpful"
+                     % (worst["title"], worst["helpful"], worst["not_helpful"]))
+    else:
+        code, why = ("not_publishable",
+                     "%d article(s) answer this; none of the best matches is both "
+                     "published and public" % len(out))
     return {"query": query, "matches": len(out), "usable": usable[:5],
             "sendable_count": len(usable), "flag_for_review": flag,
-            "top": out[:5]}
+            # True when the only thing we can offer is an article nobody has
+            # rated. The draft must say so; a reviewer deserves to know the
+            # source is unproven rather than endorsed.
+            "source_unproven": bool(usable) and not preferred,
+            "refusal_reason": code, "reason": why, "top": out[:5]}
 
 
 def draft_reply(client, ticket_ref, query):
@@ -314,10 +686,12 @@ def draft_reply(client, ticket_ref, query):
     kb = kb_candidates(client, query)
     t = get_ticket(client, ticket_ref) if ticket_ref else None
     if not kb["usable"]:
+        # Three refusals that mean different things to whoever picks this up:
+        # a publishing problem, a content-quality problem, and a coverage gap.
+        # Collapsing them into one sentence loses the only actionable part.
         return {"drafted": False, "sendable": False, "grounded_article_ids": [],
                 "flag_for_review": kb["flag_for_review"],
-                "reason": ("%d articles match %r but none is both published+public and "
-                           "acceptably rated" % (kb["matches"], query))}
+                "refusal_reason": kb.get("refusal_reason"), "reason": kb.get("reason")}
     best = kb["usable"][0]
     return {"drafted": True, "sendable": True,
             "grounded_article_ids": [best["id"]],

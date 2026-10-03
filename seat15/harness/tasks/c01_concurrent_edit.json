@@ -1,0 +1,16 @@
+{
+  "id": "c01_concurrent_edit",
+  "kind": "concurrency",
+  "note": "Written with Claude (AI-assisted) 2026-10-03. Harness task, not a hand-written test.",
+  "instances": [
+    "fixture"
+  ],
+  "fixture": "concurrent_edit",
+  "mode": "read_only",
+  "prompt": "Triage the oldest ticket still in status new: tell me its type and priority.",
+  "verifier": "seat15.harness.verifiers.seat15:noticed_the_row_moved",
+  "checks": "The filed finding carries a conflict naming the ticket and the fields that moved, and does not report the stale triage as a confident answer.",
+  "why": "Section 3 of the brief: other agents change data underneath you, so re-read before you act. Nothing in this harness tested that until now - the staleness_handled axis only counted repeated reads, which is a weak proxy. The fixture changes status, priority and assigned_to on the third read, which is after the agent has read the ticket and before it files.",
+  "why_fixture": "A live version needs a ticket write, which is open question 9. The fixture is deterministic - it mutates on a read count, not a clock - so the run is reproducible, which a real race would not be.",
+  "source": "brief section 3; team04's concurrent_edit_before_write"
+}

@@ -10,6 +10,11 @@ knowledge base, and tell me which will breach SLA."*
 
 | | |
 |---|---|
+| [`seat15/harness/`](seat15/harness/) | **The evaluation harness.** 18 tasks, 15 checkers, 6 fixtures, a two-arm experiment runner. Every checker reads the database; none reads the agent's prose. |
+| [`seat15/agent/`](seat15/agent/) | **The agent.** One loop, a fixed tool set, two policies — a fixed script and a model — over the same tools. All factual decisions live in `domain.py`, with no model in that file. |
+| [`tests/`](tests/) | 21 unit tests, hand-written by the team, not generated. |
+| [`HARNESS_STATUS.md`](HARNESS_STATUS.md) | **Start here for the harness.** What it does, what it has caught, what is still open. Written for someone who has not seen the code. |
+| [`proofs/`](proofs/) | Sanitised run summaries and experiment results. Verdict reasons are stripped: they quote ticket subjects and article titles from books other teams share. |
 | [`GAP_REPORT.md`](GAP_REPORT.md) | Week-one deliverable. What commercial helpdesk products do that AgentSwitch does not, which gaps an agent can close with this seat's existing tools, and what an agent can do that those products cannot. |
 | [`findings/`](findings/) | Defects found while measuring the platform. One filed and fixed; four written up. |
 | [`as.sh`](as.sh) | Shell helpers for logging in and calling MCP. Reads credentials from `.env`, so the password never reaches shell history. |
@@ -22,18 +27,88 @@ both are recorded rather than quietly dropped.
 
 | | | Status |
 |---|---|---|
-| 001 | App boundary not enforced for `sales` — 6 of 7 sales entities readable from a Helpdesk seat on **both** instances. Root cause now visible: `roles` carries `sales_viewer` while `allowed_apps` omits `sales` | **reproduces, and has widened** — the MCP catalogue now carries the sales entities too, so the door the write-up certified as refusing no longer does |
+| 001 | App boundary not enforced for `sales` — at its worst, 6 of 7 sales entities readable from a Helpdesk seat over all three doors. Root cause: `roles` carried `sales_viewer` while `allowed_apps` omitted `sales` | **FIXED 2026-10-03** — `sales_viewer` removed, all six now refuse on both instances. **`Item` is still readable and writable** and is in the same app. Four state changes in three weeks; the harness caught the fix itself, as *premise gone* |
 | 002 | `Ticket.tags` stored as a list where the schema declares `text`, crashing 70 of 100 ticket detail pages | **filed** — board S9, severity High, fixed |
 | 003 | `first_response_at` never recorded, so response-SLA breach is not computable; the stored flag tracks ticket status instead | **fixed on Keystone, still open on Suryodaya** (2026-09-21) — Keystone stamps 133/150 and computes breach correctly 150/150; Suryodaya stamps 1/103, leaving 24 breaches reported as compliant |
 | 004 | Agent dashboard reports $6,010,165 estimated cost against 19,100 tokens | written up — **not re-tested this pass** |
 | 005 | `reopen_count` holding values unreachable under the state machine (56 reopens on a ticket in `new`); `response_count` 48 against zero reply rows | **no longer reproduces** — max `reopen_count` is now 1, max `response_count` 1. Fixed or reseeded between passes. The `sender_type` limb was not re-tested |
 | 006 | `AgentTask.last_run_status` holds `queued`, a value its schema does not declare (15/96); 31 `cron` rows whose `cron_expression` is a product name; Keystone's two live tasks report 30 runs with `last_run_at` null | **new** — written up |
 
+## Running it
+
+Credentials come from **environment variables first, `.env` second**, so a
+deployment can inject them and never write a file:
+
+```
+AS_EMAIL, AS_PASSWORD_SURYODAYA, AS_PASSWORD_KEYSTONE
+SEAT15_LLM_BASE_URL, SEAT15_LLM_MODEL, SEAT15_LLM_API_KEY   (only for --agent llm)
+```
+
+```bash
+cp .env.example .env          # or set the variables above; either works
+pip install pytest            # the harness itself needs no third-party packages
+
+python -m pytest tests/ -q                       # 21 hand-written unit tests
+python -m seat15.harness.selftest                # 47 checker self-tests
+python -m seat15.harness.runner --agent rules    # the whole suite, no model needed
+python -m seat15.harness.runner --agent null     # a do-nothing agent: must fail everything
+python -m seat15.harness.runner --agent llm      # the same suite, model-driven
+python -m seat15.harness.grid --arms rules,llm   # both, and which tasks tell them apart
+```
+
+### Verifying it without credentials
+
+**Eight of the eighteen tasks are fixture-backed and need no `.env`, no network
+and no API key.** On a fresh clone, these two commands are the whole proof:
+
+```bash
+python -m pytest tests/ -q                                    # 21/21
+for t in b01 c01 g01 p01 r01 r02 r03 t01; do     python -m seat15.harness.runner --agent rules --task $t; done   # 8/8 approve
+```
+
+Then the check that matters more — the do-nothing agent, which **every** task
+must fail. A checker that cannot fail an agent that did nothing is testing its
+own assumptions:
+
+```bash
+for t in b01 c01 g01 p01 r01 r02 r03 t01; do     python -m seat15.harness.runner --agent null --task $t; done   # 8/8 revise
+```
+
+The remaining ten tasks run against the live platform and need `.env`.
+
+**The number worth reading is not the pass rate.** It is which tasks separate the
+two arms. A task both arms pass tells you the task is not discriminating, not
+that both agents are good. `HARNESS_STATUS.md` section 8 explains why most of
+ours do not.
+
+## What this writes
+
+The week-one gap report was produced entirely read-only. **The agent is not.** It
+writes to two entities, both inside this team's own `agent` workspace, and the
+client refuses writes to anything else in code:
+
+| Entity | Why | Reversible? |
+|---|---|---|
+| `AgentMemory` | One row per run holding the finding the harness grades. Evidence, not output. | Yes — ordinary rows |
+| `AgentTodo` | One to-do per ticket the agent could not answer, so a human sees it | **No.** This platform allows create and update but **not delete.** A row can be cancelled, never removed |
+
+Because to-dos cannot be deleted and the book is shared with other teams, the
+agent **deduplicates before filing**: a ticket that already has a to-do nobody
+has finished with is skipped. Three runs in a row file three rows, not nine, and
+`t01_todos_not_duplicated` is the task that proves it.
+
+Nothing is written to `Ticket`, `KBArticle` or any customer-facing field. The
+agent drafts replies and files them as evidence; sending them is a team decision
+that has not been taken (`GD_Week2` Q9).
+
 ## Method
 
-Everything measured was pulled **read-only** over MCP and REST against both
-instances, and every figure was re-derived from the saved pulls before the report
-was written. **Nothing was written to either book.**
+Everything in the **gap report** was pulled read-only over MCP and REST against
+both instances, and every figure was re-derived from the saved pulls before the
+report was written. Nothing was written to either book for that work.
+
+The **agent** does write, to the two entities listed above. See "What this
+writes".
 
 Figures were re-pulled and recomputed on **2026-09-20**, the submission date,
 rather than carried over from the first pass. These books are shared, and they

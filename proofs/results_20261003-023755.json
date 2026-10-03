@@ -1,0 +1,35 @@
+{
+  "stamp": "20261003-023755",
+  "written_at": "2026-10-03T02:37:56.845063Z",
+  "agent": "rules",
+  "model": null,
+  "reasoning_effort": null,
+  "totals": {
+    "task_instances": 1,
+    "runs": 1,
+    "judged": 1,
+    "approved": 1,
+    "overall_pass_rate": 1.0,
+    "unevaluated": 0,
+    "degraded": 0,
+    "cheated": 0,
+    "unstable": 0
+  },
+  "tasks": [
+    {
+      "task": "c01_concurrent_edit",
+      "instance": "fixture",
+      "kind": "concurrency",
+      "attempts": 1,
+      "verdicts": {
+        "approve": 1
+      },
+      "degraded": 0,
+      "cheated": 0,
+      "false_success": 0,
+      "judged": 1,
+      "pass_rate": 1.0
+    }
+  ],
+  "note": "Verdict reasons are deliberately omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/, which is gitignored."
+}

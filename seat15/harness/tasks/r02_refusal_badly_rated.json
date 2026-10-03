@@ -1,0 +1,16 @@
+{
+  "id": "r02_refusal_badly_rated",
+  "kind": "refusal",
+  "note": "Written with Claude (AI-assisted) 2026-10-03. Harness task, not a hand-written test.",
+  "instances": [
+    "fixture"
+  ],
+  "fixture": "refusal_reasons",
+  "mode": "read_only",
+  "prompt": "A customer writes about: Powdercoat colour mismatch. Draft a reply.",
+  "verifier": "seat15.harness.verifiers.seat15:refusal_reason_matches",
+  "expect_refusal_reason": "badly_rated",
+  "checks": "The filed refusal_reason is 'badly_rated', recomputed from the knowledge base.",
+  "why": "'We have the answer but cannot publish it', 'the answer is rated badly' and 'we have nothing' are three different problems for whoever picks up the backlog - a publishing job, a content job, and a writing job. An agent that reports one sentence for all three throws away the only actionable part.",
+  "source": "GD_Week2 per-ticket decision table"
+}

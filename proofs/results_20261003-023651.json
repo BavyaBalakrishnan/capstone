@@ -1,0 +1,35 @@
+{
+  "stamp": "20261003-023651",
+  "written_at": "2026-10-03T02:37:09.229386Z",
+  "agent": "llm",
+  "model": "gemini-3.1-flash-lite-preview",
+  "reasoning_effort": "low",
+  "totals": {
+    "task_instances": 1,
+    "runs": 3,
+    "judged": 3,
+    "approved": 0,
+    "overall_pass_rate": 0.0,
+    "unevaluated": 0,
+    "degraded": 0,
+    "cheated": 0,
+    "unstable": 0
+  },
+  "tasks": [
+    {
+      "task": "c01_concurrent_edit",
+      "instance": "fixture",
+      "kind": "concurrency",
+      "attempts": 3,
+      "verdicts": {
+        "revise": 3
+      },
+      "degraded": 0,
+      "cheated": 0,
+      "false_success": 3,
+      "judged": 3,
+      "pass_rate": 0.0
+    }
+  ],
+  "note": "Verdict reasons are deliberately omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/, which is gitignored."
+}

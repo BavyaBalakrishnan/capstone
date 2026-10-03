@@ -1,0 +1,12 @@
+{
+  "id": "q01_queue_worked_and_accounted",
+  "kind": "solvable",
+  "note": "Written with Claude (AI-assisted) from live data observed 2026-10-03. Harness task, not a hand-written test.",
+  "instances": ["suryodaya", "keystone"],
+  "mode": "read_only",
+  "prompt": "Triage the new tickets, draft a first response from the knowledge base, and tell me which will breach SLA.",
+  "verifier": "seat15.harness.verifiers.seat15:queue_worked_and_accounted",
+  "checks": "worked + not_worked equals the recounted queue; a subset requires a declared cap; every filed type and priority matches the row re-read at scoring time; every drafted reply cites only published+public articles that are not rated below half helpful over 10+ votes; the SLA half of the request is answered.",
+  "source": "the seat's own assigned request, graded end to end",
+  "why": "Every other task grades one slice. This is the whole job, and the only task whose prompt is the exact words the seat was given. Its correct answers differ by book: Keystone drafts most of its queue, Suryodaya can draft none of it."
+}

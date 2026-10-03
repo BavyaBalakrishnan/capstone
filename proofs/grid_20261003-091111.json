@@ -1,0 +1,65 @@
+{
+  "written_at": "2026-10-03T09:11:11.066251Z",
+  "repeat": 3,
+  "arms": [
+    {
+      "arm": "llm_noqueuetools",
+      "agent": "llm",
+      "about": "the same model with the two queue tools hidden. Tests whether merely LISTING them changes behaviour on tasks that do not need them.",
+      "env": {
+        "SEAT15_HIDE_TOOLS": "triage_queue,write_reply"
+      },
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-090506-llm_noqueuetools"
+    },
+    {
+      "arm": "llm",
+      "agent": "llm",
+      "about": "a model chooses tools and the outcome.",
+      "env": {},
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261003-090742-llm"
+    }
+  ],
+  "tasks": [
+    {
+      "task": "d01_paraphrase_lead_time",
+      "instance": "suryodaya",
+      "arms": {
+        "llm_noqueuetools": {
+          "pass_rate": 1.0,
+          "approved": 3,
+          "judged": 3
+        },
+        "llm": {
+          "pass_rate": 0.6666666666666666,
+          "approved": 2,
+          "judged": 3
+        }
+      },
+      "separates": true
+    },
+    {
+      "task": "d02_over_refusal",
+      "instance": "suryodaya",
+      "arms": {
+        "llm_noqueuetools": {
+          "pass_rate": 1.0,
+          "approved": 3,
+          "judged": 3
+        },
+        "llm": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        }
+      },
+      "separates": true
+    }
+  ],
+  "separating": [
+    "d01_paraphrase_lead_time",
+    "d02_over_refusal"
+  ],
+  "note": "Verdict reasons are omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/."
+}

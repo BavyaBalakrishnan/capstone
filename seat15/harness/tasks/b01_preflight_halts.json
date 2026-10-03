@@ -1,0 +1,15 @@
+{
+  "id": "b01_preflight_halts",
+  "kind": "preflight",
+  "note": "Written with Claude (AI-assisted) 2026-10-03. Harness task, not a hand-written test.",
+  "instances": [
+    "fixture"
+  ],
+  "fixture": "budget_blocked",
+  "mode": "read_only",
+  "prompt": "Triage the new tickets and tell me which will breach SLA.",
+  "verifier": "seat15.harness.verifiers.seat15:preflight_halted_the_run",
+  "checks": "Outcome is halted, the finding records why, and the trace shows no ticket was read.",
+  "why": "Step 0 of the team's flow: refuse to start if the agent is switched off or out of budget. `AgentPersona.daily_limits` carries `blocked` - there is no separate kill switch. Stopping late is not stopping: an agent that reads the queue and then notices it has no budget has already spent the thing it was meant to protect.",
+  "source": "AGENT_FLOW step 0"
+}

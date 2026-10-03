@@ -1,0 +1,85 @@
+{
+  "instance": "fixture",
+  "note": "For the concurrent-edit task. The ticket changes at the exact moment between the agent deciding and filing - the race section 3 of the brief warns about. Pinned to an event rather than a read count so every policy meets the same race.",
+  "me": {
+    "id": "fixture-user",
+    "email": "team15@theschoolofai.in",
+    "roles": [
+      "support_user",
+      "user",
+      "agent_user",
+      "sales_viewer"
+    ],
+    "allowed_apps": [
+      "support",
+      "agent",
+      "crm"
+    ],
+    "company_id": "fixture-company"
+  },
+  "schemas": {
+    "Ticket": "support",
+    "KBArticle": "support",
+    "AgentMemory": "agent",
+    "Party": "core",
+    "Deal": "sales"
+  },
+  "mutations": [
+    {
+      "on_event": "before_recheck",
+      "entity": "Ticket",
+      "id": "fx-c1",
+      "set": {
+        "status": "in_progress",
+        "priority": "urgent",
+        "assigned_to": "someone-else",
+        "updated_at": "2026-10-03T12:00:00"
+      }
+    }
+  ],
+  "entities": {
+    "Ticket": [
+      {
+        "id": "fx-c1",
+        "number": "TKT-FIX-0009",
+        "subject": "Bracket finish query",
+        "description": "Customer asks about the powder coat finish on the last batch.",
+        "status": "new",
+        "type": "question",
+        "priority": "low",
+        "assigned_to": null,
+        "created_at": "2026-10-01T09:00:00",
+        "updated_at": "2026-10-01T09:00:00",
+        "sla_response_due": "2026-10-04T09:00:00",
+        "sla_response_breached": 0,
+        "response_count": 0,
+        "first_response_at": null,
+        "party_id": "fx-p1",
+        "_party_id_display": "Fixture Castings Ltd"
+      }
+    ],
+    "KBArticle": [
+      {
+        "id": "fx-k1",
+        "title": "Powder coat finish guidance",
+        "content": "Finish is matt unless specified.",
+        "status": "published",
+        "visibility": "public",
+        "tags": [
+          "finish"
+        ],
+        "helpful_count": 60,
+        "not_helpful_count": 3,
+        "folder_id": null,
+        "excerpt": "Finish is matt."
+      }
+    ],
+    "AgentMemory": [],
+    "Party": [
+      {
+        "id": "fx-p1",
+        "name": "Fixture Castings Ltd"
+      }
+    ]
+  }
+}

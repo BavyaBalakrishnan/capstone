@@ -1,0 +1,81 @@
+{
+  "written_at": "2026-10-03T02:58:33.572933Z",
+  "repeat": 1,
+  "arms": [
+    {
+      "arm": "null",
+      "agent": "null",
+      "about": "does nothing. The floor; every task must fail it.",
+      "env": {},
+      "model": null,
+      "stamp": "20261003-025830-null"
+    },
+    {
+      "arm": "rules",
+      "agent": "rules",
+      "about": "no model. A fixed procedure over the same ten tools.",
+      "env": {},
+      "model": null,
+      "stamp": "20261003-025831-rules"
+    }
+  ],
+  "tasks": [
+    {
+      "task": "r01_refusal_not_publishable",
+      "instance": "fixture",
+      "arms": {
+        "null": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 1
+        },
+        "rules": {
+          "pass_rate": 1.0,
+          "approved": 1,
+          "judged": 1
+        }
+      },
+      "separates": true
+    },
+    {
+      "task": "r02_refusal_badly_rated",
+      "instance": "fixture",
+      "arms": {
+        "null": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 1
+        },
+        "rules": {
+          "pass_rate": 1.0,
+          "approved": 1,
+          "judged": 1
+        }
+      },
+      "separates": true
+    },
+    {
+      "task": "r03_refusal_no_coverage",
+      "instance": "fixture",
+      "arms": {
+        "null": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 1
+        },
+        "rules": {
+          "pass_rate": 1.0,
+          "approved": 1,
+          "judged": 1
+        }
+      },
+      "separates": true
+    }
+  ],
+  "separating": [
+    "r01_refusal_not_publishable",
+    "r02_refusal_badly_rated",
+    "r03_refusal_no_coverage"
+  ],
+  "note": "Verdict reasons are omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/."
+}

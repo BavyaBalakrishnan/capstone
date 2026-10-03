@@ -36,8 +36,16 @@ both are recorded rather than quietly dropped.
 
 ## Running it
 
+Credentials come from **environment variables first, `.env` second**, so a
+deployment can inject them and never write a file:
+
+```
+AS_EMAIL, AS_PASSWORD_SURYODAYA, AS_PASSWORD_KEYSTONE
+SEAT15_LLM_BASE_URL, SEAT15_LLM_MODEL, SEAT15_LLM_API_KEY   (only for --agent llm)
+```
+
 ```bash
-cp .env.example .env          # then fill in: two passwords, one model API key
+cp .env.example .env          # or set the variables above; either works
 pip install pytest            # the harness itself needs no third-party packages
 
 python -m pytest tests/ -q                       # 21 hand-written unit tests

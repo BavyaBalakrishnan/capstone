@@ -116,15 +116,35 @@ class Client(object):
 
     # -- auth ---------------------------------------------------------------
 
+    def cred(self, name):
+        """A credential, from the environment first and `.env` second.
+
+        Environment first because that is how a deployment supplies these - it
+        injects variables, it does not write a file. Found 2026-10-03: this read
+        `.env` only, so a deployment with the variables correctly set would have
+        failed at login with a bare KeyError on AS_EMAIL. The model
+        configuration already worked this way round; the client did not, and the
+        inconsistency was the bug.
+        """
+        return os.environ.get(name) or self._env.get(name)
+
     def login(self):
         if self._token:
             return self._token
-        pw = self._env.get("AS_PASSWORD_" + self.instance.upper())
-        if not pw:
-            raise Refused("no password for %s in .env" % self.instance)
+        pw = self.cred("AS_PASSWORD_" + self.instance.upper())
+        email = self.cred("AS_EMAIL")
+        missing = [n for n, v in (("AS_EMAIL", email),
+                                  ("AS_PASSWORD_" + self.instance.upper(), pw))
+                   if not v]
+        if missing:
+            raise Refused(
+                "cannot log in to %s: %s not set. Supply them as environment "
+                "variables or in a .env file beside the repo root (see "
+                ".env.example). The fixture-backed tasks need neither."
+                % (self.instance, " and ".join(missing)))
         status, body, headers = self._send(
             self.base + "/api/auth/login", "POST",
-            {"email": self._env["AS_EMAIL"], "password": pw}, auth=False)
+            {"email": email, "password": pw}, auth=False)
         if status != 200:
             raise Refused("login failed on %s: HTTP %s" % (self.instance, status))
         self._token = json.loads(body).get("token")

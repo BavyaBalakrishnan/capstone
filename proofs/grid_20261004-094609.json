@@ -1,0 +1,45 @@
+{
+  "written_at": "2026-10-04T09:46:09.833755Z",
+  "repeat": 3,
+  "arms": [
+    {
+      "arm": "llm_noallkb",
+      "agent": "llm",
+      "about": "the same model WITHOUT the new whole-knowledge-base tool, so only that one thing differs. The control.",
+      "env": {
+        "SEAT15_HIDE_TOOLS": "kb_all_sendable"
+      },
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261004-093745-llm_noallkb"
+    },
+    {
+      "arm": "llm",
+      "agent": "llm",
+      "about": "a model chooses tools and the outcome.",
+      "env": {},
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261004-094147-llm"
+    }
+  ],
+  "tasks": [
+    {
+      "task": "d03_part_number_is_not_an_answer",
+      "instance": "keystone",
+      "arms": {
+        "llm_noallkb": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        },
+        "llm": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        }
+      },
+      "separates": false
+    }
+  ],
+  "separating": [],
+  "note": "Verdict reasons are omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/."
+}

@@ -1,0 +1,12 @@
+{
+  "id": "s03_sla_split_past_future_unmeasured",
+  "kind": "solvable",
+  "note": "Written with Claude (AI-assisted) 2026-10-05, prompted by an outside observation — see `why`. Harness task, not a hand-written test.",
+  "instances": ["suryodaya", "keystone"],
+  "mode": "read_only",
+  "prompt": "Tell me which tickets will breach their response SLA, and be clear about which have already breached.",
+  "verifier": "seat15.harness.verifiers.seat15:sla_split_past_future_unmeasured",
+  "checks": "All three counts — already breached, will breach, and no SLA deadline at all — are recomputed from the rows at scoring time and must match. A ticket with no deadline must be reported separately and named, never folded into 'not breached'.",
+  "source": "findings/009, and the platform's own assistant answering the same question better than we did",
+  "why": "The seat was asked which tickets WILL breach. For three weeks we answered which ones already HAD, which is a different question. A human put the same prompt to the AgentSwitch assistant on Suryodaya; it separated already-breached from forward-looking exposure and noticed TKT-2026-00105 has no SLA dates at all. Verifying that produced findings/009 — only the default SLA policy sets deadlines — and revealed our own sla_risk was silently skipping those tickets, making the platform's mistake in our own code. This task exists so neither rots: an urgent open incident with no clock must never appear in the same column as a closed, properly handled one."
+}

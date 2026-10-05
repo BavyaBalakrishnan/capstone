@@ -85,9 +85,17 @@ def degraded(run):
     Added 2026-09-25 after a single /api/schemas timeout made a live Gemini run
     look like a model failure. A degraded run is not evidence about the agent,
     and the results table has to say so rather than leaving it in the trace.
+
+    Refined 2026-10-03: `tool_errors` alone was wrong. It counts a POLICY's own
+    mistakes too - a malformed call, a missing argument - and those are the
+    agent's behaviour, not our plumbing. Five runs were excluded from a
+    measurement because the model wrote {"tool": ..., "query": ...} instead of
+    wrapping the argument in "args". An axis meant to protect a measurement was
+    deleting it.
     """
     h = run.get("health") or {}
-    return bool(run.get("degraded") or h.get("tool_errors") or h.get("transport_failures"))
+    ours = (h.get("tool_errors") or 0) - (h.get("policy_errors") or 0)
+    return bool(run.get("degraded") or ours > 0 or h.get("transport_failures"))
 
 
 def score(run, verdict):

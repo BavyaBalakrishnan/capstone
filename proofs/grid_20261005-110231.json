@@ -1,0 +1,49 @@
+{
+  "written_at": "2026-10-05T11:02:31.937900Z",
+  "repeat": 3,
+  "arms": [
+    {
+      "arm": "llm_noslaguard",
+      "agent": "llm",
+      "about": "the same model, with the loop no longer asking for the SLA half of a request that names it.",
+      "env": {
+        "SEAT15_NO_SLA_GUARD": "1"
+      },
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261005-104304-llm_noslaguard"
+    },
+    {
+      "arm": "llm",
+      "agent": "llm",
+      "about": "a model chooses tools and the outcome.",
+      "env": {},
+      "model": "gemini-3.1-flash-lite-preview",
+      "stamp": "20261005-105037-llm"
+    }
+  ],
+  "tasks": [
+    {
+      "task": "i01_sla_not_computable_suryodaya",
+      "instance": "suryodaya",
+      "arms": {
+        "llm_noslaguard": {
+          "pass_rate": 0.0,
+          "approved": 0,
+          "judged": 3
+        },
+        "llm": {
+          "pass_rate": 1.0,
+          "approved": 3,
+          "judged": 3
+        }
+      },
+      "comparable": true,
+      "separates": true
+    }
+  ],
+  "separating": [
+    "i01_sla_not_computable_suryodaya"
+  ],
+  "not_compared": [],
+  "note": "Verdict reasons are omitted: they quote ticket subjects and article titles from books other teams share. Raw runs stay in runs/."
+}

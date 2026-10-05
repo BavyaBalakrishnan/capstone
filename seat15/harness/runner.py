@@ -45,8 +45,10 @@ RUNS_DIR = os.path.join(os.path.dirname(os.path.dirname(HERE)), "runs")
 # REQUEST is the agent's problem and must still be graded.
 OUR_FAULT = re.compile(
     r"HTTP 429|HTTP 5\d\d|quota|rate.?limit|insufficient_quota|billing"
-    r"|timed out|Connection (refused|reset|aborted)|Name or service not known"
-    r"|Temporary failure in name resolution", re.I)
+    r"|timed out|timeout|Connection ?(refused|reset|aborted)|ConnectionReset"
+    r"|ConnectionAborted|BrokenPipe|RemoteDisconnected|IncompleteRead"
+    r"|forcibly closed|10054|Name or service not known|getaddrinfo"
+    r"|Temporary failure in name resolution|SSLError|EOF occurred", re.I)
 
 
 def _why(text):

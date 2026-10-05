@@ -35,6 +35,11 @@ from seat15.agent import domain
 MAX_STEPS = int(os.environ.get("SEAT15_MAX_STEPS") or 20)
 REPEAT_LIMIT = 2
 
+# Characters of a tool result the model is shown. Raised from 3,000 on
+# 2026-10-05: the whole sendable knowledge base is ~8,800 characters, and at
+# 3,000 the model saw 5 of 25 articles and was not told the rest existed.
+RESULT_BUDGET = int(os.environ.get("SEAT15_RESULT_BUDGET") or 14000)
+
 # Phrases that make a request about MORE THAN ONE ticket. One list, used by the
 # baseline to pick its plan and by the model's prompt to decide which tools are
 # worth offering. Stated once so the two arms cannot drift apart.
@@ -52,6 +57,20 @@ QUEUE_TOOLS = ("triage_queue", "write_reply", "file_todos")
 
 def queue_request(prompt):
     return bool(re.search(QUEUE_WORDS, (prompt or "").lower()))
+
+
+LOOK_FIRST_GUARD = ("not done: you are refusing a request that asks for an answer "
+                    "from the knowledge base, and you have not read it. Look "
+                    "before you conclude:" + chr(10) +
+                    "  kb_candidates(query=<the words of the request>)" + chr(10) +
+                    "If nothing there answers the question, say that - it is a "
+                    "different and better answer than refusing without looking.")
+
+
+SLA_GUARD = ("not done: the request asks which tickets breach SLA and you have "
+             "not worked it out. Call sla_risk() - it decides whether breach is "
+             "even computable on this instance and recomputes it from the rows. "
+             "If it says not computable, say so; that is the answer, not a failure.")
 
 
 FINISH_GUARD = ("not done: %d ticket(s) your own triage marked draftable still "
@@ -125,6 +144,12 @@ TOOLS = {
         "fn": lambda a, c: domain.kb_candidates(c, a["query"]),
         "args": {"query": "str"},
         "about": "KB articles matching a query, each marked sendable or not and by rating"},
+    "kb_all_sendable": {
+        "fn": lambda a, c: domain.all_sendable(c),
+        "args": {},
+        "about": ("every article you may send, complete and unranked. Small enough "
+                  "to read in full. Use it to check what kb_candidates ranked first "
+                  "is really an answer, and to say with confidence when nothing is.")},
     "draft_reply": {
         "fn": lambda a, c: domain.draft_reply(c, a.get("ticket"), a["query"]),
         "args": {"ticket": "str|null", "query": "str"},
@@ -138,6 +163,23 @@ TOOLS = {
 
 # --------------------------------------------------------------------------- finding
 
+def _policys_fault(tool, args, error):
+    """Is this error the policy's doing rather than the platform's?
+
+    Conservative on purpose: anything not clearly the policy's mistake counts as
+    ours, so a real infrastructure failure is never hidden inside a measurement.
+    """
+    text = str(error).lower()
+    if tool not in TOOLS:
+        return True                       # asked for a tool that does not exist
+    for mark in ("repeat guard", "unknown tool", "missing", "required",
+                 "keyerror", "run triage_queue first", "empty body",
+                 "no article", "is not sendable", "blocked band"):
+        if mark in text:
+            return True
+    return False
+
+
 def assemble_finding(results, outcome, summary="", conflict=None):
     """Build the graded row from tool OUTPUTS. The policy supplies only `outcome`."""
     f = {"outcome": outcome, "summary": summary[:500]}
@@ -147,7 +189,9 @@ def assemble_finding(results, outcome, summary="", conflict=None):
         s = results["sla_risk"]
         f["sla"] = {k: s.get(k) for k in ("computable", "reason", "recomputed_breach",
                                            "disagrees", "stored_flag_disagreements",
-                                           "open_breaching")}
+                                           "open_breaching", "already_breached",
+                                           "will_breach", "will_breach_soonest",
+                                           "no_sla_clock", "no_sla_clock_tickets")}
     # The ticket and its triage can come from either tool. Found 2026-09-21: the
     # model read type and priority straight off oldest_new_ticket, answered
     # correctly, and this function — which only looked at triage_ticket — filed a
@@ -218,6 +262,28 @@ class Agent(object):
         self.calls_by_key = {}
         self.tool_calls = 0
         self.tool_errors = 0
+        # A tool error caused by the POLICY - a malformed call, a missing
+        # argument, a tool that does not exist - is the policy's behaviour and
+        # belongs in the measurement. A tool error caused by the platform or the
+        # network is ours and must not be read as the agent failing. Counting
+        # them together made the `degraded` axis fire on model mistakes, which
+        # excluded exactly the runs we most wanted to measure. Found 2026-10-03:
+        # five runs of i05 were marked degraded because the model emitted
+        # {"tool": ..., "query": ...} instead of wrapping it in "args".
+        self.policy_errors = 0
+
+    @staticmethod
+    def _refusing(action):
+        return action.get("outcome") in ("refused", "escalated")
+
+    def _read_kb(self):
+        """Has this run actually looked at the knowledge base?
+
+        Read off the calls the client recorded, not off what the policy claims.
+        """
+        if os.environ.get("SEAT15_NO_LOOK_GUARD"):
+            return True
+        return any(c.get("entity") == "KBArticle" for c in getattr(self.c, "calls", []))
 
     def _unfinished_drafts(self, history):
         """Tickets the agent itself judged draftable and has not drafted.
@@ -287,6 +353,36 @@ class Agent(object):
             self.trace({"event": "decide", "step": step, "action": action})
 
             if action.get("done"):
+                # Half an answer to a two-part request. Measured 2026-10-05:
+                # asked to "triage the new tickets and tell me which will breach
+                # SLA", the model walked the queue and finished without ever
+                # computing SLA - so the finding carried no sla figure at all.
+                # Same shape as the unfinished-drafts guard, same rule: if a
+                # part of the request matters, the loop asks for it rather than
+                # hoping the model remembers.
+                if (left > 2 and "sla_risk" not in self.results
+                        and not os.environ.get("SEAT15_NO_SLA_GUARD")
+                        and re.search(r"sla|breach", prompt.lower())):
+                    self.trace({"event": "sla_unanswered", "step": step})
+                    history.append({"tool": "__sla_guard__", "args": {},
+                                    "result": {"error": SLA_GUARD}})
+                    continue
+                # Refusing before gathering evidence is wrong on any task, so it
+                # is the loop's job rather than the model's to remember - the
+                # same reasoning as preflight, re-reading and finishing.
+                # Measured 2026-10-04 on d03: asked to answer a customer from the
+                # knowledge base, the model decided it needed order data it
+                # cannot see, refused, and never opened the knowledge base at
+                # all. Deliberately phrased around evidence, not around that
+                # task: nothing here knows what the question was about.
+                if (self._refusing(action) and left > 2
+                        and not self._read_kb()
+                        and re.search(r"knowledge base|kb|article|draft a reply",
+                                      prompt.lower())):
+                    self.trace({"event": "refused_without_looking", "step": step})
+                    history.append({"tool": "__look_first__", "args": {},
+                                    "result": {"error": LOOK_FIRST_GUARD}})
+                    continue
                 unfinished = self._unfinished_drafts(history)
                 if unfinished and left > len(unfinished):
                     # Measured 2026-10-03: the model capped the queue at 5, found
@@ -333,6 +429,8 @@ class Agent(object):
                             "failed": out["failed"][:5]})
             if isinstance(out, dict) and "error" in out:
                 self.tool_errors += 1
+                if _policys_fault(tool, args, out["error"]):
+                    self.policy_errors += 1
             elif tool == "write_reply":
                 # One per ticket, so they accumulate rather than overwrite.
                 self.results.setdefault("drafts", []).append(out)
@@ -405,6 +503,7 @@ class Agent(object):
         # the same as one where the agent never reached the platform, and they
         # must not share a column (S18Code/harnesses/base.py).
         health = {"tool_calls": self.tool_calls, "tool_errors": self.tool_errors,
+                  "policy_errors": self.policy_errors,
                   "transport_retries": getattr(self.c, "transport_retries", 0),
                   "transport_failures": getattr(self.c, "transport_failures", 0),
                   "model_calls": len(getattr(self.policy, "stats", []) or []),
@@ -417,12 +516,52 @@ class Agent(object):
                 "health": health,
                 # True when our own plumbing failed during the run. A degraded run
                 # must not be read as a wrong answer by the agent.
-                "degraded": bool(health["tool_errors"] or health["transport_failures"])}
+                "degraded": bool(health["transport_failures"]
+                                 or (health["tool_errors"] - health["policy_errors"]))}
 
 
 def _clip(obj, n=1500):
+    """Shorten a tool result, saying so rather than pretending.
+
+    The old version cut the JSON mid-string and handed the model the fragment.
+    Found 2026-10-05: kb_candidates grew to 8,838 characters once it carried the
+    whole sendable book, the model-facing limit was 3,000, and the model
+    received five of twenty-five articles ending mid-word - then reported that
+    nothing in the knowledge base matched. It passed the task. **It passed on
+    mangled input**, which is a lucky pass, not a result.
+
+    Two changes. A list is shortened by dropping whole ELEMENTS, so what the
+    model sees is always well-formed, and it is told how many were dropped -
+    silence about missing options is what made the old behaviour dangerous.
+    Anything still too long says plainly that it was truncated.
+    """
+    if len(json.dumps(obj, default=str)) <= n:
+        return obj
+    if isinstance(obj, dict):
+        out = {}
+        for k, v in obj.items():
+            out[k] = v
+            if isinstance(v, list) and len(json.dumps(out, default=str)) > n:
+                kept, acc = [], json.dumps({x: y for x, y in out.items() if x != k},
+                                           default=str)
+                for item in v:
+                    nxt = len(acc) + len(json.dumps(item, default=str)) + 2
+                    if nxt > n:
+                        break
+                    kept.append(item)
+                    acc += json.dumps(item, default=str)
+                out[k] = kept
+                if len(kept) < len(v):
+                    out[k + "_omitted"] = (
+                        "%d of %d not shown - this list is INCOMPLETE, do not "
+                        "conclude anything from what is absent"
+                        % (len(v) - len(kept), len(v)))
+        if len(json.dumps(out, default=str)) <= n:
+            return out
     s = json.dumps(obj, default=str)
-    return obj if len(s) <= n else {"_clipped": s[:n]}
+    return {"_truncated": True,
+            "_note": "cut at %d of %d characters; treat as incomplete" % (n, len(s)),
+            "_head": s[:n]}
 
 
 # --------------------------------------------------------------------------- rules policy
@@ -659,7 +798,8 @@ class LLMPolicy(object):
             msgs.append({"role": "assistant",
                          "content": json.dumps({"tool": h["tool"], "args": h["args"]})})
             msgs.append({"role": "user",
-                         "content": "RESULT " + json.dumps(_clip(h["result"], 3000), default=str)})
+                         "content": "RESULT " + json.dumps(
+                             _clip(h["result"], RESULT_BUDGET), default=str)})
         if steps_left <= 1:
             msgs.append({"role": "user", "content":
                          "You are out of steps. Finish now with a done object."})

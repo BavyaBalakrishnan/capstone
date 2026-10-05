@@ -7,6 +7,8 @@ verifier that cannot judge returns UNEVALUATED, which never counts as a pass.
 Expected answers are recomputed here, at scoring time, never hardcoded — other
 teams edit the same rows between the run and the grading.
 """
+import datetime
+
 from seat15.harness.verify import (A, BLOCK_BELOW, MIN_VOTES, R, U,
                                    parse_dt, provenance_line)
 
@@ -100,6 +102,15 @@ def sla_not_computable_suryodaya(ctx):
         return problem
 
     sla = f.get("sla") or {}
+    # Not answering and answering wrongly are different failures and must not
+    # share a message. Found 2026-10-05: a run that never called sla_risk filed
+    # no `sla` block at all, and this read the resulting None as "claimed
+    # computable" - accusing the agent of a claim it never made. A wrong failure
+    # reason sends someone to fix the wrong thing, which is how we spent an hour
+    # on prompting in September when the real bug was a missing refusal code.
+    if not sla:
+        return R, ("never addressed the SLA half of the request - no sla figure "
+                   "was filed at all, so there is nothing to judge against %s" % why)
     if sla.get("computable") is not False:
         return R, ("claimed the response SLA is computable on %s; %s"
                    % (ctx.instance, why))
@@ -796,3 +807,191 @@ def todos_not_duplicated(ctx):
     return A, ("%d escalated, %d to-dos filed, %d already had one; every escalated "
                "ticket has exactly one open to-do"
                % (len(escalated), created, already))
+
+
+# A phrase set for "this article addresses a short shipment". Phrases, not single
+# words: `quantity` and `count` appear incidentally in three sendable articles
+# (minimum order quantity, release-schedule counts, PO required fields) and none
+# of them answers "my shipment is 48 pieces short". Measured 2026-10-04: with
+# these phrases, 0 of 25 sendable articles on Keystone and 0 of 10 on Suryodaya
+# match, so the correct answer to such a question is currently that nothing
+# covers it.
+SHORT_SHIPMENT = ("short ship", "short-ship", "shipped short", "shortage",
+                  "short count", "miscount", "quantity discrepan",
+                  "count discrepan", "packed count", "short on the",
+                  "pieces short", "missing pieces", "balance of the order")
+
+
+def part_number_is_not_an_answer(ctx):
+    """d03. The part number matches. The article still does not answer the question.
+
+    A customer reports 48 pieces missing from a shipment of FG-CAB-3300. The only
+    sendable article carrying that part number explains how to touch up powder
+    coat chips with an IPA wipe and a touch-up pen. Keyword matching ranks it
+    first and it is published, public and not badly rated, so every quality gate
+    we have lets it through.
+
+    Sending it answers "where are my 48 parts" with "here is how to sand a chip".
+
+    This is the gap our other tasks miss. `i04` and the refusal tasks cover the
+    case where nothing is sendable; `d01` covers the case where the right answer
+    exists but shares none of the question's words. **This is the case where a
+    wrong answer looks right to every check except reading it**, which is exactly
+    the judgement a fixed procedure cannot make and a reader can.
+
+    In practice our own baseline reaches for a different wrong article - "Cab
+    step frame - damaged crate claims" - which is a subtler trap and a fairer
+    one. That article is about visible transit damage: note it on the bill of
+    lading before signing, photograph the crate. A customer who is 48 pieces
+    short cannot photograph parts that were never in the crate, and has nothing
+    to note on the bill of lading. It reads like an answer and instructs the
+    customer to do something impossible.
+
+    That judgement is stated here rather than hidden in a word list: **an
+    article about transit damage does not answer a count discrepancy**, because
+    its first required step cannot be performed. If the team disagrees, the
+    phrase list below is where to argue it.
+
+    Nothing is pinned to an id. What counts as covering a short shipment is
+    recomputed here from the article text, so if someone publishes a real
+    shortage article the premise changes and this task says so instead of
+    failing an agent that then correctly uses it.
+    """
+    articles = ctx.rest.list("KBArticle", limit=500)
+    if not articles:
+        return U, "premise gone: no KB articles readable"
+
+    def covers(a):
+        hay = (_text(a.get("title")) + " " + _text(a.get("excerpt")) + " "
+               + _text(a.get("content"))).lower()
+        return any(p in hay for p in SHORT_SHIPMENT)
+
+    sendable = [a for a in articles
+                if a.get("status") == "published" and a.get("visibility") == "public"
+                and _band(a) != "blocked"]
+    if not sendable:
+        return U, "premise gone: nothing is sendable on this instance at all"
+    acceptable = [a for a in sendable if covers(a)]
+
+    f, err = _finding(ctx)
+    if err:
+        return err
+    if problem := _no_protected_reads(ctx):
+        return problem
+
+    # The agent must have consulted the knowledge base. Escalating without
+    # looking is the right answer reached by not doing the work, and this task
+    # would otherwise reward it.
+    looked = any(c.get("entity") == "KBArticle" for c in ctx.trace)
+    if not looked:
+        return R, ("never read the knowledge base, so its conclusion is not "
+                   "grounded in anything - the right answer for the wrong reason")
+
+    reply = f.get("reply") or {}
+    used = set(reply.get("grounded_article_ids") or [])
+    by_id = {a["id"]: a for a in articles}
+
+    if acceptable:
+        # Someone published a real shortage article since this was written. The
+        # correct behaviour flips: the agent should now use it.
+        ok_ids = {a["id"] for a in acceptable}
+        titles = sorted(str(a.get("title")) for a in acceptable)
+        if not used:
+            return R, ("escalated although %d sendable article(s) now cover a short "
+                       "shipment: %s" % (len(acceptable), titles))
+        wrong = used - ok_ids
+        if wrong:
+            return R, ("cited %s, which does not address a short shipment; %s does"
+                       % (sorted(str(by_id[i].get("title")) for i in wrong if i in by_id),
+                          titles))
+        return A, "used the shortage article that now exists: %s" % titles
+
+    # Today's state: nothing covers it, so any citation is a wrong answer.
+    if used:
+        names = sorted(str(by_id[i].get("title")) for i in used if i in by_id)
+        return R, ("cited %s to answer a count shortage. No sendable article "
+                   "addresses a short shipment; that one matches on the part "
+                   "number and explains powder coat touch-up" % names)
+    return A, ("did not answer a shortage question from an article that only "
+               "shares its part number (%d sendable, 0 covering)" % len(sendable))
+
+
+def sla_split_past_future_unmeasured(ctx):
+    """s03. "Which will breach" is three questions, not one.
+
+    A ticket is in exactly one of three states, and collapsing them loses the
+    thing the asker wanted:
+
+        already breached   the deadline passed and nothing was sent
+        will breach        a deadline in the future with no response yet
+        no clock at all    no deadline exists, so nothing can be measured
+
+    We answered the first and called it the third for three weeks. The
+    distinction came from outside: a human put the same question to the
+    platform's own assistant, which separated already-breached from
+    forward-looking exposure and noticed a ticket with no SLA dates. Both are
+    now in the agent, and this is the task that stops them rotting.
+
+    The third state is the one with teeth. The platform records a ticket with no
+    deadline as `sla_response_breached = 0`, which reads as compliant
+    (findings/009), and our own sla_risk used to `continue` past such tickets -
+    making the same mistake quietly. An urgent open incident simply vanished
+    from the count. So this verifier fails an agent that reports no figure for
+    them, whichever way it is wrong.
+
+    Everything is recomputed from the rows at scoring time. Nothing is pinned.
+    """
+    tickets = ctx.rest.list("Ticket", limit=500)
+    if not tickets:
+        return U, "premise gone: no tickets readable"
+
+    now = datetime.datetime.utcnow()
+    live = lambda t: t.get("status") not in ("closed", "resolved")
+    no_clock, already, will = [], [], []
+    for t in tickets:
+        due = parse_dt(t.get("sla_response_due"))
+        first = parse_dt(t.get("first_response_at"))
+        if due is None:
+            no_clock.append(t)
+            continue
+        if not live(t):
+            continue
+        if (first > due) if first else (now > due):
+            already.append(t)
+        elif not first:
+            will.append(t)
+
+    f, err = _finding(ctx)
+    if err:
+        return err
+    if problem := _no_protected_reads(ctx):
+        return problem
+    sla = f.get("sla") or {}
+    if not sla:
+        return R, "the request asked which tickets breach SLA; the finding says nothing"
+
+    if "no_sla_clock" not in sla:
+        return R, ("reports no figure for tickets with no SLA deadline. %d such "
+                   "ticket(s) exist and the platform calls them 'not breached', "
+                   "which is not the same as compliant" % len(no_clock))
+
+    started = ctx.started_at()
+    moved = sum(1 for t in tickets if _after(t.get("updated_at"), started))
+
+    for label, expected, key in (("tickets with no SLA clock", len(no_clock), "no_sla_clock"),
+                                 ("already breached", len(already), "already_breached"),
+                                 ("will breach", len(will), "will_breach")):
+        got = sla.get(key)
+        if got is None:
+            return R, "filed no count for %s" % label
+        if got != expected and abs(got - expected) > moved:
+            return R, ("filed %s = %s, the book says %d (only %d row(s) moved "
+                       "after the run began)" % (key, got, expected, moved))
+
+    if no_clock and not (sla.get("no_sla_clock_tickets") or []):
+        return R, ("counted %d ticket(s) with no SLA clock but named none, so "
+                   "nobody can act on it" % len(no_clock))
+
+    return A, ("split the question correctly: %d already breached, %d will "
+               "breach, %d have no deadline at all"
+               % (len(already), len(will), len(no_clock)))

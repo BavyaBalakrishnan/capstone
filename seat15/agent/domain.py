@@ -455,6 +455,42 @@ def file_todos(client, queue, cap=None, run_id=None):
             "failed": failed, "todos": created}
 
 
+def all_sendable(client):
+    """Every article this seat may actually send, with its text. No ranking.
+
+    Added 2026-10-04 alongside kb_candidates rather than replacing it. The
+    reason is a limitation of any shortlist: a model handed the top five
+    cannot know what it was NOT shown, so "nothing here answers this" is always
+    partly a guess. Here it is a statement it can defend.
+
+    Affordable only because the sendable set is tiny - 25 articles and ~1,300
+    tokens on Keystone, 10 and ~620 on Suryodaya, because almost nothing is
+    published. If the publishing gap we are recommending ever gets closed this
+    stops being free, and the caller should fall back to kb_candidates. The
+    count is returned so a caller can see that coming.
+
+    kb_candidates is deliberately left exactly as it was: the refusal codes that
+    five tasks grade are computed from its scoring, and the rules policy has no
+    other way to choose an article. Replacing it would have broken the baseline
+    and widened the gap between the arms for a reason that had nothing to do
+    with the model.
+    """
+    rows = []
+    for a in client.rows("KBArticle"):
+        if a.get("status") != "published" or a.get("visibility") != "public":
+            continue
+        band = rating_band(a.get("helpful_count"), a.get("not_helpful_count"))
+        if band == "blocked":
+            continue
+        rows.append({"id": a.get("id"), "title": _text(a.get("title")),
+                     "band": band, "text": _text(a.get("content") or a.get("body"))})
+    rows.sort(key=lambda r: r["title"])
+    words = sum(len(r["text"].split()) for r in rows)
+    return {"sendable": len(rows), "approx_words": words, "articles": rows,
+            "note": ("Every article you may send, unranked and complete. If none "
+                     "answers the question, say so - you have seen all of them.")}
+
+
 def write_reply(client, ticket, article_id, body):
     """Take the model's prose and attach a provenance line it cannot fake.
 
@@ -509,25 +545,49 @@ def sla_risk(client, now=None):
     stamped = sum(1 for t in tickets if t.get("first_response_at"))
     computable = stamped >= len(tickets) * SLA_EVIDENCE_THRESHOLD
 
-    per, disagree = [], []
+    per, disagree, no_clock = [], [], []
     for t in tickets:
         due = parse_dt(t.get("sla_response_due"))
         first = parse_dt(t.get("first_response_at"))
         if due is None:
+            # NOT skipped. A ticket with no deadline cannot breach, and the
+            # platform records that as sla_response_breached = 0 - compliant,
+            # not unmeasured (findings/009). Our own code used to `continue`
+            # here, which made the same mistake quietly: an urgent open incident
+            # with no clock simply vanished from the count.
+            no_clock.append({"ticket": _tno(t), "status": t.get("status"),
+                             "priority": t.get("priority"),
+                             "sla_policy": t.get("_sla_id_display"),
+                             "stored_flag": bool(t.get("sla_response_breached"))})
             continue
         breached = (first > due) if first else (now > due)
         basis = "first_response_at" if first else "no_response_recorded"
         stored = bool(t.get("sla_response_breached"))
         row = {"ticket": _tno(t),
                "status": t.get("status"), "priority": t.get("priority"),
-               "breached": breached, "basis": basis, "stored_flag": stored}
+               "breached": breached, "basis": basis, "stored_flag": stored,
+               "due": t.get("sla_response_due"),
+               "hours_remaining": (None if first or breached
+                                   else round((due - now).total_seconds() / 3600.0, 1))}
         per.append(row)
         if stored != breached:
             disagree.append(row)
 
-    open_at_risk = [r for r in per if r["breached"]
-                    and r["status"] not in ("closed", "resolved")]
+    live = [r for r in per if r["status"] not in ("closed", "resolved")]
+    open_at_risk = [r for r in live if r["breached"]]
+    # The seat was asked which tickets WILL breach. Until 2026-10-05 we answered
+    # with the ones that already had - a different question. The distinction came
+    # from the platform's own assistant answering the same prompt and separating
+    # the two; forward-looking exposure on Suryodaya turned out to be zero, which
+    # our number did not say.
+    will_breach = sorted((r for r in live
+                          if not r["breached"] and r["basis"] == "no_response_recorded"),
+                         key=lambda r: r["hours_remaining"])
     reason = ("first_response_at populated on %d of %d tickets" % (stamped, len(tickets)))
+    if no_clock:
+        reason += ("; %d ticket(s) have NO response deadline at all and so cannot "
+                   "breach - the platform reports them as not breached, which is "
+                   "not the same as compliant (findings/009)" % len(no_clock))
     if not computable:
         reason += ("; response-SLA breach has no ground truth here, so the numbers "
                    "below are a recomputation from sla_response_due, not a measurement")
@@ -537,6 +597,11 @@ def sla_risk(client, now=None):
         "evidence": {"stamped": stamped, "total": len(tickets)},
         "recomputed_breach": bool(open_at_risk),
         "open_breaching": len(open_at_risk),
+        "already_breached": len(open_at_risk),
+        "will_breach": len(will_breach),
+        "will_breach_soonest": will_breach[:5],
+        "no_sla_clock": len(no_clock),
+        "no_sla_clock_tickets": no_clock[:5],
         "stored_flag_disagreements": len(disagree),
         "disagrees": bool(disagree),
         "disagreement_sample": disagree[:5],
@@ -615,7 +680,8 @@ def kb_candidates(client, query):
     """
     weights = query_weights(query)
     out = []
-    for a in client.rows("KBArticle"):
+    every = client.rows("KBArticle")
+    for a in every:
         hay = (_text(a.get("title")) + " " + _text(a.get("tags")) + " "
                + _text(a.get("excerpt"))).lower()
         hits = [w for w in weights if w in hay]
@@ -677,7 +743,50 @@ def kb_candidates(client, query):
             # rated. The draft must say so; a reviewer deserves to know the
             # source is unproven rather than endorsed.
             "source_unproven": bool(usable) and not preferred,
-            "refusal_reason": code, "reason": why, "top": out[:5]}
+            "refusal_reason": code, "reason": why, "top": out[:5],
+            # The whole sendable set, when it is small enough to read. Added
+            # 2026-10-04 after offering it as a separate tool failed: the model
+            # never chose to call it, which is the preflight lesson again - a
+            # capability a policy must remember to use is one it will not use.
+            # Scoring, `top`, and every refusal code above are UNCHANGED, so the
+            # rules policy and the five tasks that grade those codes behave
+            # exactly as before; this is an extra field they do not read.
+            "all_sendable": _whole_book(every)}
+
+
+# Above this many sendable articles, showing them all stops being free and the
+# shortlist has to do its job again. 25 on Keystone today, 8 on Suryodaya.
+WHOLE_BOOK_LIMIT = 40
+
+
+def _whole_book(articles):
+    """Every sendable, non-blocked article in full - or a note saying why not.
+
+    Built from the RAW rows, not from the scored matches. That distinction is
+    the whole point: the scoring loop skips any article with no keyword hit, so
+    an article the query does not happen to share a word with never appears in
+    the result at all. Those are exactly the ones a model needs in order to say
+    "none of these answers the question" and mean it.
+    """
+    usable = []
+    for a in articles:
+        if a.get("status") != "published" or a.get("visibility") != "public":
+            continue
+        band = rating_band(a.get("helpful_count"), a.get("not_helpful_count"))
+        if band == "blocked":
+            continue
+        usable.append({"id": a.get("id"), "title": _text(a.get("title")),
+                       "band": band,
+                       "text": _text(a.get("content") or a.get("body"))})
+    usable.sort(key=lambda r: r["title"])
+    if len(usable) > WHOLE_BOOK_LIMIT:
+        return {"shown": False, "sendable": len(usable),
+                "note": "too many to list; rely on the ranked matches above"}
+    return {"shown": True, "sendable": len(usable),
+            "note": ("Every article you may send, complete and unranked, including "
+                     "ones that did not match your query. If none of these answers "
+                     "the question, say so - you have now seen all of them."),
+            "articles": usable}
 
 
 def draft_reply(client, ticket_ref, query):

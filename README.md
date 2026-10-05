@@ -10,13 +10,13 @@ knowledge base, and tell me which will breach SLA."*
 
 | | |
 |---|---|
-| [`seat15/harness/`](seat15/harness/) | **The evaluation harness.** 18 tasks, 15 checkers, 6 fixtures, a two-arm experiment runner. Every checker reads the database; none reads the agent's prose. |
+| [`seat15/harness/`](seat15/harness/) | **The evaluation harness.** 20 tasks, 17 checkers, 6 fixtures, a two-arm experiment runner. Every checker reads the database; none reads the agent's prose. |
 | [`seat15/agent/`](seat15/agent/) | **The agent.** One loop, a fixed tool set, two policies — a fixed script and a model — over the same tools. All factual decisions live in `domain.py`, with no model in that file. |
 | [`tests/`](tests/) | 21 unit tests, hand-written by the team, not generated. |
 | [`HARNESS_STATUS.md`](HARNESS_STATUS.md) | **Start here for the harness.** What it does, what it has caught, what is still open. Written for someone who has not seen the code. |
 | [`proofs/`](proofs/) | Sanitised run summaries and experiment results. Verdict reasons are stripped: they quote ticket subjects and article titles from books other teams share. |
 | [`GAP_REPORT.md`](GAP_REPORT.md) | Week-one deliverable. What commercial helpdesk products do that AgentSwitch does not, which gaps an agent can close with this seat's existing tools, and what an agent can do that those products cannot. |
-| [`findings/`](findings/) | Eight defects found while measuring the platform. One fixed at the root, two filed on the platform's own bug board, five written up. |
+| [`findings/`](findings/) | Nine defects found while measuring the platform. One fixed at the root, two filed on the platform's own bug board, six written up. |
 | [`as.sh`](as.sh) | Shell helpers for logging in and calling MCP. Reads credentials from `.env`, so the password never reaches shell history. |
 | `.env.example` | Template. Copy to `.env`, which is gitignored. |
 
@@ -36,6 +36,7 @@ report that silently updates itself cannot be audited.
 | 005 | `reopen_count` holding values unreachable under the state machine (56 reopens on a ticket in `new`); `response_count` 48 against zero reply rows | **no longer reproduces** — max `reopen_count` is now 1, max `response_count` 1. Fixed or reseeded between passes. The `sender_type` limb was not re-tested |
 | 006 | `AgentTask.last_run_status` holds `queued`, a value its schema does not declare (15/96); 31 `cron` rows whose `cron_expression` is a product name; Keystone's two live tasks report 30 runs with `last_run_at` null | **new** — written up |
 | 007 | `KBArticle.helpful_count` and `not_helpful_count` are writable by any client that can update an article, and no entity records the individual votes behind them. The only quality signal an answering agent has cannot be audited | written up — **the write was deliberately not attempted**, so this is read from the schema rather than proven by abuse |
+| 009 | A ticket with no SLA deadline is recorded as `not breached` — the same value a ticket gets for being answered on time, so unmeasured is indistinguishable from compliant | **LOW, not filed** — 2 tickets, both our own probes, no customer ticket affected. Our first explanation (only the default policy sets deadlines) was **wrong** and is retracted in the report: Keystone runs 100 tickets on five non-default policies with no deadlines missing |
 | 008 | **An empty reply stamps `first_response_at` and counts as a response.** On `TKT-2026-00103` the first-response timestamp matches an empty-bodied reply to the microsecond. Response SLA can therefore be satisfied without answering anyone | **FILED 2026-10-03** — `BugReport` `0a7bf46b`. Proven from evidence already on the platform; no new write was made |
 
 ## Running it
@@ -62,7 +63,7 @@ python -m seat15.harness.grid --arms rules,llm   # both, and which tasks tell th
 
 ### Verifying it without credentials
 
-**Eight of the eighteen tasks are fixture-backed and need no `.env`, no network
+**Eight of the twenty tasks are fixture-backed and need no `.env`, no network
 and no API key.** On a fresh clone, these two commands are the whole proof:
 
 ```bash
@@ -78,7 +79,7 @@ own assumptions:
 for t in b01 c01 g01 p01 r01 r02 r03 t01; do     python -m seat15.harness.runner --agent null --task $t; done   # 8/8 revise
 ```
 
-The remaining ten tasks run against the live platform and need `.env`.
+The remaining twelve tasks run against the live platform and need `.env`.
 
 **The number worth reading is not the pass rate.** It is which tasks separate the
 two arms. A task both arms pass tells you the task is not discriminating, not

@@ -1,0 +1,16 @@
+{
+  "id": "d03_part_number_is_not_an_answer",
+  "kind": "discriminating",
+  "note": "Written with Claude (AI-assisted) from live rows observed 2026-10-04 (TKT-2026-00096 and the FG-CAB-3300 article). Harness task, not a hand-written test.",
+  "instances": [
+    "keystone"
+  ],
+  "mode": "read_only",
+  "prompt": "A customer reports that their FG-CAB-3300 Cab Step Frame shipment for lot 4474 arrived 48 pieces short of the ASN. They want the packed count confirmed and the balance shipped. Draft a reply from the knowledge base.",
+  "verifier": "seat15.harness.verifiers.seat15:part_number_is_not_an_answer",
+  "checks": "The agent consulted the knowledge base, and did not cite an article that merely shares the part number. What counts as covering a short shipment is recomputed from article text at scoring time, so the correct answer flips if one is ever published.",
+  "source": "live rows: TKT-2026-00096 and 'FG-CAB-3300 cab step frame - powder coat care and touch-up'",
+  "why": "Every quality gate we have passes this wrong answer. The article is published, public, not badly rated, and ranks first on keyword match - it is in the draftable set our own agent produces. Only reading it reveals that a customer asking where 48 missing parts are would be told how to sand a paint chip. i04 and the refusal tasks cover 'nothing is sendable'; d01 covers 'the right answer uses different words'; this covers 'the wrong answer looks right to everything except a reader'.",
+  "measured": "2026-10-04, 3 runs each: the fixed script 0/3 and the model 0/3, for opposite reasons. The script cited 'Cab step frame - damaged crate claims', which tells a customer to photograph damage to parts that were never in the crate. The model asked for sales-order access, was refused, and finished without opening the knowledge base at all. Neither is right, and the two failures are different shapes - which is the point of keeping it.",
+  "honest_note": "This does not yet separate the arms: both fail it. A task both arms fail is still evidence - it says the agent has no correct path here - but it is not yet doing the job a discriminating task is for. The prompt was NOT softened until the model passed; tuning a task against the agent is how a suite stops measuring anything."
+}

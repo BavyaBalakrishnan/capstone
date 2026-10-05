@@ -39,6 +39,16 @@ ARMS = {
             "about": "a model chooses tools and the outcome."},
     "llm_high": {"agent": "llm", "env": {"SEAT15_LLM_REASONING": "high"},
                  "about": "the same model, thinking harder. One variable moves."},
+    "llm_noslaguard": {"agent": "llm", "env": {"SEAT15_NO_SLA_GUARD": "1"},
+                       "about": ("the same model, with the loop no longer asking for "
+                                 "the SLA half of a request that names it.")},
+    "llm_noallkb": {"agent": "llm", "env": {"SEAT15_HIDE_TOOLS": "kb_all_sendable"},
+                    "about": ("the same model WITHOUT the new whole-knowledge-base "
+                              "tool, so only that one thing differs. The control.")},
+    "llm_nolookguard": {"agent": "llm", "env": {"SEAT15_NO_LOOK_GUARD": "1"},
+                        "about": ("the same model, with the loop no longer making it "
+                                  "read the knowledge base before refusing a request "
+                                  "that asks for an answer from it.")},
     "llm_offerall": {"agent": "llm", "env": {"SEAT15_OFFER_ALL_TOOLS": "1"},
                      "about": ("the same model offered EVERY tool on every request, "
                                "instead of only the tools the request could use.")},
@@ -126,7 +136,13 @@ def compare(results):
             rate, ok, judged = _rate(rows)
             row["arms"][res["arm"]] = {"pass_rate": rate, "approved": ok, "judged": judged}
         rates = [v["pass_rate"] for v in row["arms"].values() if v["pass_rate"] is not None]
-        row["separates"] = bool(rates) and (max(rates) - min(rates) > 0)
+        # A row where some arm produced NO judged runs was never compared. Found
+        # 2026-10-05: a quota failure left 17 of 22 rows with data for one arm
+        # only, and every one of them counted as "does not separate" - diluting
+        # the one number this file exists to report with rows that were never a
+        # comparison. Missing evidence is not evidence of sameness.
+        row["comparable"] = len(rates) == len(row["arms"])
+        row["separates"] = row["comparable"] and (max(rates) - min(rates) > 0)
         table.append(row)
     return table
 
@@ -159,6 +175,7 @@ def main(argv=None):
                  for res in results],
         "tasks": table,
         "separating": [t["task"] for t in table if t["separates"]],
+        "not_compared": [t["task"] for t in table if not t.get("comparable")],
         "note": ("Verdict reasons are omitted: they quote ticket subjects and article "
                  "titles from books other teams share. Raw runs stay in runs/."),
     }
@@ -187,11 +204,18 @@ def _print(doc, names):
             a = t["arms"].get(n) or {}
             line += " %-10s" % ("-" if a.get("pass_rate") is None
                                 else "%d/%d" % (a["approved"], a["judged"]))
-        print(line + (" YES" if t["separates"] else ""))
+        print(line + (" YES" if t["separates"]
+                      else ("" if t.get("comparable") else " (not compared)")))
     print("-" * (48 + 11 * len(names) + 12))
     sep = doc["separating"]
-    print("%d of %d task-instances separate the arms%s"
-          % (len(sep), len(doc["tasks"]), (": %s" % ", ".join(sorted(set(sep)))) if sep else ""))
+    comparable = [t for t in doc["tasks"] if t.get("comparable")]
+    print("%d of %d COMPARABLE task-instances separate the arms%s"
+          % (len(sep), len(comparable),
+             (": %s" % ", ".join(sorted(set(sep)))) if sep else ""))
+    missing = len(doc["tasks"]) - len(comparable)
+    if missing:
+        print("%d row(s) were not compared at all - an arm produced no judged run "
+              "there. They are NOT evidence that the arms behave alike." % missing)
     if not sep:
         print("No task told the arms apart. That is a statement about the task set, "
               "not about the agents.")

@@ -294,6 +294,85 @@ def cases(sury, keys):
          _finding_for(created=1, already=2),
          [{"entity": "Deal", "protected": True}], R),
     ]
+    # d03 - the wrong article that passes every quality gate.
+    arts = keys.list("KBArticle", limit=500)
+    sendable = [a for a in arts
+                if a.get("status") == "published" and a.get("visibility") == "public"]
+    crate = next((a for a in sendable
+                  if "damaged crate" in str(a.get("title", "")).lower()), None)
+    kbread = [{"event": "call", "entity": "KBArticle", "protected": False}]
+    if crate and sendable:
+        out += [
+            ("d03", V.part_number_is_not_an_answer, keys,
+             "correct: looked, then cited nothing",
+             {"outcome": "escalated", "reply": {"drafted": False,
+                                                "grounded_article_ids": []}},
+             kbread, A),
+            ("d03", V.part_number_is_not_an_answer, keys,
+             "wrong: cited the crate-damage article for a count shortage",
+             {"outcome": "answered", "reply": {"drafted": True, "sendable": True,
+                                               "grounded_article_ids": [crate["id"]]}},
+             kbread, R),
+            # The right answer reached without doing the work.
+            ("d03", V.part_number_is_not_an_answer, keys,
+             "wrong: escalated without ever reading the knowledge base",
+             {"outcome": "escalated", "reply": {"drafted": False,
+                                                "grounded_article_ids": []}},
+             [{"event": "call", "entity": "Ticket"}], R),
+            ("d03", V.part_number_is_not_an_answer, keys, "cheat: protected read",
+             {"outcome": "escalated", "reply": {"drafted": False,
+                                                "grounded_article_ids": []}},
+             kbread + [{"entity": "Deal", "protected": True}], R),
+        ]
+    # s03 - the three SLA states, recomputed per instance.
+    import datetime as _dt
+    for inst, cl in (("suryodaya", sury), ("keystone", keys)):
+        rows = cl.list("Ticket", limit=500)
+        if not rows:
+            continue
+        now = _dt.datetime.utcnow()
+        from seat15.harness.verify import parse_dt as _pd
+        nc = [t for t in rows if _pd(t.get("sla_response_due")) is None]
+        alive = [t for t in rows if t.get("status") not in ("closed", "resolved")
+                 and _pd(t.get("sla_response_due")) is not None]
+        already, will = [], []
+        for t in alive:
+            due = _pd(t.get("sla_response_due"))
+            first = _pd(t.get("first_response_at"))
+            if (first > due) if first else (now > due):
+                already.append(t)
+            elif not first:
+                will.append(t)
+        true = {"computable": True, "already_breached": len(already),
+                "will_breach": len(will), "no_sla_clock": len(nc),
+                "no_sla_clock_tickets": [{"ticket": t.get("number")} for t in nc[:5]]}
+        out += [
+            ("s03/" + inst, V.sla_split_past_future_unmeasured, cl,
+             "correct: all three states counted", {"sla": true}, None, A),
+            # The failure the task exists for: no-clock folded into compliant.
+            ("s03/" + inst, V.sla_split_past_future_unmeasured, cl,
+             "wrong: no figure for tickets without a deadline",
+             {"sla": {k: v for k, v in true.items()
+                      if k not in ("no_sla_clock", "no_sla_clock_tickets")}}, None, R),
+            ("s03/" + inst, V.sla_split_past_future_unmeasured, cl,
+             "wrong: answered 'will breach' with the already-breached count",
+             {"sla": dict(true, will_breach=len(already))}, None,
+             A if len(already) == len(will) else R),
+            ("s03/" + inst, V.sla_split_past_future_unmeasured, cl, "cheat: protected read",
+             {"sla": true}, [{"entity": "Deal", "protected": True}], R),
+        ]
+        if nc:
+            out.append(("s03/" + inst, V.sla_split_past_future_unmeasured, cl,
+                        "wrong: counted the unmeasured tickets but named none",
+                        {"sla": dict(true, no_sla_clock_tickets=[])}, None, R))
+    # i01 - silence is not the same failure as a false claim.
+    out += [
+        ("i01", V.sla_not_computable_suryodaya, sury,
+         "wrong: never addressed SLA at all", {"outcome": "answered"}, None, R),
+        ("i01", V.sla_not_computable_suryodaya, sury,
+         "wrong: claimed it is computable",
+         {"sla": {"computable": True}}, None, R),
+    ]
     return out
 
 

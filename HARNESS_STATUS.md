@@ -77,18 +77,18 @@ number. One of our checks fails it for exactly that.
 ## 4. What we have, in numbers
 
 ```
-18 tasks (21 runs, because some run on both businesses)
-15 checkers
+20 tasks (24 runs, because some run on both businesses)
+17 checkers
 21 hand-written unit tests, written by the team
 ```
 
 | Test | What it proves | Result |
 |---|---|---|
 | Do-nothing agent | a checker never passes an agent that did nothing | fails all 21 |
-| Checker self-test | checkers say yes to right answers, no to wrong ones, and catch cheats | 47 / 47 |
+| Checker self-test | checkers say yes to right answers, no to wrong ones, and catch cheats | 60 / 60 |
 | Hand-written unit tests | the small pieces behave as decided | 21 / 21 |
 | Fixed script (no AI) | the whole pipeline works end to end | 17 of 19 |
-| AI model (Gemini) | an AI can drive it | 17 of 19 |
+| AI model (Gemini) | an AI can drive it | 18 of 19 |
 
 Two of the 21 runs could not be judged at all, which is a result in its own
 right: the thing they were testing had been **fixed on the platform**, so the
@@ -96,11 +96,56 @@ checker said *"premise gone"* instead of passing or failing. A run that cannot b
 judged never counts as a pass. That is why the totals above are out of 19.
 
 The two the fixed script fails are the two that need real understanding — it is
-*supposed* to fail those. The two the AI fails are a different story: one is the
-finish-guard failure described in section 7, since fixed and re-measured at 3/3,
-and the other is a task that has passed and failed on different runs of the same
-preview model. **Single runs of a model are samples, not measurements** — which
-is why the harness takes `--repeat`.
+*supposed* to fail those.
+
+The one the AI fails, it fails **5 times out of 5**: it does not flag
+badly-rated public articles for review, where the fixed script does. That is a
+real weakness, measured rather than guessed — and getting to that sentence took
+three attempts, which is the more useful story:
+
+- The first five runs came back **0/5 and all five marked "degraded"**, meaning
+  by our own rules they were not evidence at all.
+- The cause was ours. The model had written `{"tool": ..., "query": ...}`
+  instead of wrapping the argument in `"args"`, and our health check counted
+  **any** tool error as *our plumbing failing*. A malformed call is the model's
+  behaviour — it is exactly what we are trying to measure.
+- That check was added to stop a network timeout being misread as a model
+  failure. It had quietly grown into the opposite problem: **an axis meant to
+  protect a measurement was deleting it.**
+
+Tool errors are now split by whose fault they are. Transport failures, timeouts
+and quota are ours and still mark a run unusable. A malformed call, a missing
+argument or an unknown tool is the policy's, and counts as behaviour. The
+classifier is deliberately cautious: anything not clearly the policy's mistake
+is still treated as ours, so a real failure can never hide inside a result.
+
+**One run of a model is a sample, not a measurement.** It is why the harness
+takes `--repeat`, why every claim in section 7 is written as *n*/3, and why
+nobody should quote a number from here that came from a single run.
+
+### The numbers that matter, measured three times each
+
+A single run of a model is a sample, not a measurement — this week four tasks
+flipped between runs and each time a single run nearly became a claim. So the
+six tasks that have ever been unstable were run **three times per arm**:
+
+```
+task                              fixed script    AI
+d01  paraphrase lead time             0/3        3/3    <- separates
+d02  over-refusal                     0/3        3/3    <- separates
+d03  part number is not an answer     0/3        3/3    <- separates
+i01  SLA not computable               3/3        3/3
+i05  stale article not sent           3/3        3/3
+q01  the whole job, Keystone          3/3        3/3
+q01  the whole job, Suryodaya         3/3        3/3
+```
+
+No flapping anywhere. The three that separate the arms do so completely, and
+they are exactly the three that need judgement rather than procedure. The AI
+passes all seven instances; the fixed script fails precisely where it should.
+
+This is the only table in this document whose numbers were taken more than once,
+and it is the only one we would defend.
 
 ## 5. The task that checks the whole job
 
@@ -242,12 +287,61 @@ and an overstatement.)
 
 A model reads a long tool list as a hint about what the job is. This is the
 **second** time this has bitten us — the first was a permissions tool, whose
-presence alone pushed the AI toward refusing. So the rule is now explicit: **offer
-a model the tools the request could use, not every tool that exists.**
+presence alone pushed the AI toward refusing.
 
-The general lesson: a capability added for good reasons changed behaviour
-somewhere unrelated, and the only way to tell that apart from the AI just having a
-bad day was to **move exactly one thing and re-measure.**
+**We then wrote down a rule, and the rule was wrong.** The rule said: offer a
+model the tools the request could use, not every tool that exists. One more
+measurement, run back to back on a different task, says it is a trade-off:
+
+```
+                         all tools offered    only relevant tools
+over-refusal task              0 / 3                3 / 3
+stale-article task             3 / 3                0 / 3
+```
+
+Filtering the tool list **fixed** over-refusal on one task and **caused** it on
+another. Net effect across the suite: zero. One task gained, one lost, and we
+have no mechanism that explains both directions.
+
+So the filtering stays — it is neutral, not an improvement — and it is recorded
+here as an **open question, not a finding**. Three runs each is not enough to
+build a rule on, and the first version of this section proves the point: it
+generalised a single measurement into advice, which is exactly the mistake this
+document warns about two sections later.
+
+The general lesson is the method, not the tool list: a capability added for good
+reasons changed behaviour somewhere unrelated, and the only way to tell that
+apart from the AI having a bad day was to **move exactly one thing and
+re-measure** — then do it again on a second task before believing it.
+
+### This happened four times in two days
+
+Every safety mechanism we added distorted the thing it was protecting:
+
+| We added | What it did instead |
+|---|---|
+| A permissions tool in the list | Made the AI refuse jobs it could do |
+| A guard demanding unfinished work | Demanded it while withholding the article id needed to do it |
+| A check marking runs unusable when our plumbing broke | Marked runs unusable when the **AI** made a mistake, deleting the measurement |
+| A tool giving the AI the whole knowledge base | **Nothing at all — it never called it** |
+
+That last row is the sharpest. The tool worked, was useful, and changed no
+outcome, because using it was optional. Putting the same information into a
+result the AI already receives took the task from **0/3 to 3/3** without the AI
+having to decide anything.
+
+Four times in two days, the rule held:
+
+> **If a behaviour matters, the loop does it. Anything the model must remember
+> to do, it will not do.**
+
+That now covers checking permissions, re-reading a row before filing,
+finishing a multi-item job, looking before refusing, and seeing the whole
+knowledge base rather than a shortlist.
+
+None was visible from the feature itself. Each showed up only by running the
+whole suite and asking **why** a number was what it was, instead of accepting
+it. That is a better argument for having a harness than any pass rate in it.
 
 ## 8. The honest caveat
 

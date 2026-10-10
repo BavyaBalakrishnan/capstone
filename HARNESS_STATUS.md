@@ -77,23 +77,31 @@ number. One of our checks fails it for exactly that.
 ## 4. What we have, in numbers
 
 ```
-20 tasks (24 runs, because some run on both businesses)
-17 checkers
+21 tasks (25 runs, because some run on both businesses)
+18 checkers
 21 hand-written unit tests, written by the team
 ```
+
+One of those 21 tasks was written by someone who had **not** read our agent's
+code, and it is the most useful task we have. See section 5a.
 
 | Test | What it proves | Result |
 |---|---|---|
 | Do-nothing agent | a checker never passes an agent that did nothing | fails all 21 |
 | Checker self-test | checkers say yes to right answers, no to wrong ones, and catch cheats | 60 / 60 |
 | Hand-written unit tests | the small pieces behave as decided | 21 / 21 |
-| Fixed script (no AI) | the whole pipeline works end to end | 17 of 19 |
-| AI model (Gemini) | an AI can drive it | 18 of 19 |
+| Fixed script (no AI) | the whole pipeline works end to end | 19 of 23 |
+| AI model (Gemini) | an AI can drive it | **23 of 23** |
 
-Two of the 21 runs could not be judged at all, which is a result in its own
+Two of the 25 runs could not be judged at all, which is a result in its own
 right: the thing they were testing had been **fixed on the platform**, so the
 checker said *"premise gone"* instead of passing or failing. A run that cannot be
-judged never counts as a pass. That is why the totals above are out of 19.
+judged never counts as a pass. That is why the totals above are out of 23.
+
+**Four tasks separate the two versions**, and the AI wins all four: the
+paraphrased question, the over-refusal, the wrong article that looks right, and
+the one written by someone outside the team. The fixed script fails exactly
+those four and nothing else.
 
 The two the fixed script fails are the two that need real understanding — it is
 *supposed* to fail those.
@@ -171,6 +179,58 @@ does not match. Before this, the line was honest only because our code happened
 to write it honestly. Now it is honest because it is checked. We added a fake case
 to the self-test — a reply claiming "rated 999 helpful" — and confirmed it gets
 caught.
+
+## 5a. The task we did not write, and what it found
+
+Every other task in this suite is phrased in the words our own code looks for,
+because we wrote both sides. A team member who had never seen the code
+suggested this one:
+
+> *"A few of the new requests mention customers having trouble with a feature.
+> Please check the available help articles and draft the first reply for each
+> one. If the information we have doesn't actually explain how to fix the
+> problem, just tell me that rather than guessing."*
+
+**On its first run, both versions handled ONE ticket and stopped.**
+
+The cause was ours, not the AI's. The loop decided whether a request was about
+many tickets by matching a list of phrases we had written — "new tickets", "the
+tickets", "queue", "each ticket". This person wrote **"new requests"** and
+**"each one"**, which mean exactly the same thing in English and matched
+nothing. So the loop hid the queue tools, and the AI could not walk the queue
+even in principle.
+
+Same prompt, same model, only our filter moved:
+
+```
+                   filter ON     filter OFF
+tickets walked         –             8
+replies drafted        0             4
+```
+
+Given the tools it did the whole job: walked the queue, drafted for every
+answerable ticket, escalated the one with no usable article. **It understood the
+request perfectly. We had taken the capability away and then read the result as
+a model failure.**
+
+The filter is now off. Three measurements justify that, each moving one thing:
+
+```
+d02 over-refusal     the filter once HELPED   0/3 -> 3/3   (now 3/3 either way)
+i05 stale article    the filter HURT          3/3 -> 0/3   (now 3/3 either way)
+this task            the filter HURT          4 drafts -> 0
+```
+
+The task it was originally protecting has since been fixed by other means, so
+removing it costs nothing and fixes ordinary English.
+
+**The task is now permanent** (`h01`), in their wording, unchanged. Its failure
+message is written for whoever hits it next: *"the most likely cause is ours,
+not the model's — check whether the queue tools were offered for this
+phrasing."*
+
+If you read one thing in this document and act on it, make it this: **one
+paragraph from one outsider found what twenty of our own tasks could not.**
 
 ## 6. What the harness has actually caught
 

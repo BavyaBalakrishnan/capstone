@@ -13,6 +13,7 @@ person) can see why the agent concluded what it did.
 """
 import datetime
 import json
+import os
 import re
 
 from seat15.harness.client import PROTECTED_ENTITIES
@@ -756,7 +757,7 @@ def kb_candidates(client, query):
 
 # Above this many sendable articles, showing them all stops being free and the
 # shortlist has to do its job again. 25 on Keystone today, 8 on Suryodaya.
-WHOLE_BOOK_LIMIT = 40
+WHOLE_BOOK_LIMIT = int(os.environ.get("SEAT15_WHOLE_BOOK_LIMIT") or 40)
 
 
 def _whole_book(articles):

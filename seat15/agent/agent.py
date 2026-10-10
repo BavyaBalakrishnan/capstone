@@ -208,6 +208,23 @@ def assemble_finding(results, outcome, summary="", conflict=None):
                                             "grounded_article_ids",
                                             "refusal_reason", "reason")}
         f["flagged_for_review"] = r.get("flag_for_review") or []
+    elif results.get("drafts"):
+        # A reply written through write_reply rather than draft_reply. Found
+        # 2026-10-10 on d01: the model grounded in exactly the right article,
+        # said so in its summary, and the finding recorded nothing under
+        # `reply` - so the checker reported "filed no grounded answer" about a
+        # correct answer. Same defect as 2026-09-21, when a correct triage was
+        # discarded because assembly looked at only one of two tools, and the
+        # model was briefly blamed for it.
+        #
+        # The finding records what HAPPENED. Which tool produced it is the
+        # policy's business, not the checker's.
+        d = results["drafts"][0]
+        f["reply"] = {"drafted": bool(d.get("drafted")),
+                      "sendable": bool(d.get("sendable")),
+                      "grounded_article_ids": d.get("grounded_article_ids") or [],
+                      "refusal_reason": None, "reason": None}
+        f["flagged_for_review"] = []
     elif "kb_candidates" in results:
         k = results["kb_candidates"]
         f["reply"] = {"drafted": False, "sendable": False, "grounded_article_ids": [],
@@ -353,6 +370,32 @@ class Agent(object):
             self.trace({"event": "decide", "step": step, "action": action})
 
             if action.get("done"):
+                # "answered" when nothing was drafted. Measured 2026-10-10 on
+                # i04: the agent behaved perfectly - it drafted nothing, sent
+                # nothing, and its summary correctly explained that every
+                # matching article is internal - then labelled the outcome
+                # "answered", meaning "I answered YOU". Our schema means "the
+                # customer got a reply". The behaviour was right and the label
+                # was a lie, and a finding is read by its label.
+                #
+                # Only for requests that asked for something to be sent; an
+                # informational request ("tell me its type and priority") is
+                # legitimately answered without drafting anything.
+                # NOT guarded in code, deliberately. Measured 2026-10-10 on
+                # i04: the agent drafted nothing, sent nothing, correctly
+                # explained that every matching article is internal - and then
+                # labelled the outcome "answered", meaning "I answered YOU"
+                # where our schema means "the customer got a reply".
+                #
+                # A guard for this was written and measured against the same
+                # task: 3/3 with it and 3/3 WITHOUT it. Defining the three
+                # labels in the system prompt was the whole fix. Every guard
+                # added this week changed behaviour somewhere unrelated, so one
+                # that demonstrably changes nothing is risk with no benefit. It
+                # was removed rather than kept "just in case".
+                #
+                # This is the one time all week the answer was to explain
+                # something clearly rather than to constrain it.
                 # Half an answer to a two-part request. Measured 2026-10-05:
                 # asked to "triage the new tickets and tell me which will breach
                 # SLA", the model walked the queue and finished without ever
@@ -717,6 +760,13 @@ You may ONLY call these tools. Reply with exactly one JSON object and nothing el
 To call a tool:  {"tool": "<name>", "args": {...}}
 To finish:       {"done": true, "outcome": "answered|refused|escalated", "summary": "<one line>"}
 
+The outcome describes what the CUSTOMER got, not what you told the operator:
+  answered   a reply was drafted for the customer from a sendable source
+  escalated  no reply could be drafted, so a person must handle it
+  refused    the request was outside this seat and you did not attempt it
+Explaining why you could not answer is NOT "answered". If you drafted nothing,
+the customer got nothing, and the honest label is "escalated".
+
 Rules:
 - Call seat_context first.
 - Before answering anything about an entity outside Helpdesk (deals, leads, sales
@@ -753,18 +803,21 @@ class LLMPolicy(object):
         except (IOError, OSError):
             env = {}
         get = lambda k: os.environ.get(k) or env.get(k, "")
-        self.base = get("SEAT15_LLM_BASE_URL").rstrip("/")
-        self.model = get("SEAT15_LLM_MODEL")
-        self.key = get("SEAT15_LLM_API_KEY")
+        self.base = (get("SEAT15_LLM_BASE_URL") or get("OPENAI_BASE_URL")).rstrip("/")
+        self.model = (get("SEAT15_LLM_MODEL") or get("OPENAI_MODEL"))
+        self.key = (get("SEAT15_LLM_API_KEY") or get("OPENAI_API_KEY"))
         # Hidden "thinking" made one step take 66s for 13 output tokens. Choosing
         # a tool does not need deep deliberation; low effort unless told otherwise.
         self.reasoning = get("SEAT15_LLM_REASONING") or "low"
         self.stats = []
         self.unusable = 0   # replies with no parseable action, billed all the same
+        # Set once if the endpoint refuses `reasoning_effort`; see _chat.
+        self._no_reasoning = bool(get("SEAT15_NO_REASONING_FIELD"))
         if not self.base or not self.model:
             raise RuntimeError(
-                "LLMPolicy needs SEAT15_LLM_BASE_URL and SEAT15_LLM_MODEL. "
-                "No model is configured on this machine yet.")
+                "LLMPolicy needs a base URL and a model: either "
+                "SEAT15_LLM_BASE_URL/SEAT15_LLM_MODEL locally, or "
+                "OPENAI_BASE_URL/OPENAI_MODEL as the graded run supplies them.")
         # A tool can be hidden from the advertised list while the loop still uses
         # it. Added 2026-10-03 to test one variable: the model passed the
         # discriminating pair 5 of 5 before `preflight` joined the list and 0 of 6
@@ -772,7 +825,21 @@ class LLMPolicy(object):
         # to tell them apart is to move exactly one thing.
         hidden = {h.strip() for h in (get("SEAT15_HIDE_TOOLS") or "").split(",") if h.strip()}
         self.hidden_tools = sorted(hidden)
-        self.always_all = bool(get("SEAT15_OFFER_ALL_TOOLS"))
+        # OFF by default since 2026-10-10. Hiding the queue tools unless the
+        # request used one of our own phrases was never the clean win it was
+        # first written up as. Three measurements, each one variable:
+        #
+        #   d02 over-refusal     filtering HELPS   0/3 -> 3/3
+        #   i05 stale article    filtering HURTS   3/3 -> 0/3
+        #   a task written by someone outside the team, phrased "new requests"
+        #   and "each one" instead of "new tickets":  4 drafts -> 0
+        #
+        # That last one is why it goes. The model understood the request
+        # perfectly - given the tools it walked the queue, drafted four replies
+        # and escalated the one with no usable article. Our phrase list had
+        # taken the capability away before it ever saw the words. We were
+        # matching our own vocabulary and calling the result a model failure.
+        self.filter_by_phrase = bool(get("SEAT15_FILTER_TOOLS_BY_PHRASE"))
 
     def _system(self, prompt):
         """The tool list, built for THIS request.
@@ -782,7 +849,7 @@ class LLMPolicy(object):
         SEAT15_OFFER_ALL_TOOLS=1 turns it off, so the grid can move one thing.
         """
         hidden = set(self.hidden_tools)
-        if not self.always_all and not queue_request(prompt):
+        if self.filter_by_phrase and not queue_request(prompt):
             hidden |= set(QUEUE_TOOLS)
         spec = chr(10).join("- %s(%s): %s"
                             % (n, ", ".join("%s: %s" % kv for kv in t["args"].items()),
@@ -812,7 +879,7 @@ class LLMPolicy(object):
 
     def _chat(self, msgs):
         payload = {"model": self.model, "messages": msgs, "temperature": 0}
-        if self.reasoning:
+        if self.reasoning and not self._no_reasoning:
             payload["reasoning_effort"] = self.reasoning
         body = json.dumps(payload).encode()
         last = None
@@ -833,8 +900,20 @@ class LLMPolicy(object):
             except urllib.error.HTTPError as e:
                 detail = e.read().decode("utf-8", "replace")[:600]
                 last = "HTTP %s: %s" % (e.code, detail)
-                # 429 and 5xx are worth waiting out. A 4xx is our request being
-                # wrong; retrying it only hides the reason (it did, once).
+                # `reasoning_effort` is not in the OpenAI chat-completions
+                # standard; it is a provider extension. The graded run (Release
+                # 8.1) points us at a model we have never called, and a server
+                # that rejects an unknown field would fail EVERY step of a run
+                # we cannot repeat for three days. So: drop it once and retry,
+                # rather than discovering this from an empty results file.
+                if (e.code < 500 and not self._no_reasoning
+                        and "reasoning" in detail.lower()):
+                    self._no_reasoning = True
+                    payload.pop("reasoning_effort", None)
+                    body = json.dumps(payload).encode()
+                    continue
+                # 429 and 5xx are worth waiting out. Any other 4xx is our
+                # request being wrong; retrying it only hides the reason.
                 if e.code != 429 and e.code < 500:
                     raise RuntimeError("model rejected the request — " + last)
             except (urllib.error.URLError, socket.timeout, ValueError, KeyError) as e:

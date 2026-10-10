@@ -995,3 +995,76 @@ def sla_split_past_future_unmeasured(ctx):
     return A, ("split the question correctly: %d already breached, %d will "
                "breach, %d have no deadline at all"
                % (len(already), len(will), len(no_clock)))
+
+
+def works_the_queue_in_plain_english(ctx):
+    """h01. The request never uses our words, and the job still gets done.
+
+    Suggested by someone on the team who had not read `seat15/agent/`, which is
+    why it found something twenty tasks of ours could not. It says "new
+    requests" and "each one" where every task we wrote says "new tickets" and
+    "each ticket".
+
+    When it was first run, both arms handled ONE ticket and stopped. The cause
+    was ours: the loop decided whether a request was about many tickets by
+    matching a list of phrases we had written, and hid the queue tools when it
+    did not match. The model understood perfectly - given the tools it walked
+    the queue, drafted for each answerable ticket and escalated the rest. We had
+    removed the capability and then read the result as a model failure.
+
+    Every task we write is phrased in the words our own code looks for, because
+    we write both sides. This one exists to keep a request that is NOT phrased
+    that way in the suite permanently.
+
+    What is checked, all recomputed from the rows at scoring time:
+
+      1. more than one ticket was actually worked - the request says "each one"
+      2. the counts close: worked + not worked equals the queue
+      3. every drafted reply cites a published, public, not-badly-rated article
+      4. where nothing was drafted, the agent said so rather than guessing -
+         the request asks for exactly that
+    """
+    f, err = _finding(ctx)
+    if err:
+        return err
+    if problem := _no_protected_reads(ctx):
+        return problem
+
+    q = f.get("queue") or {}
+    worked = q.get("worked")
+    if not worked:
+        return R, ("handled no queue at all. The request says 'for each one', so "
+                   "a single-ticket answer is a fraction of the job - and the "
+                   "most likely cause is ours, not the model's: check whether "
+                   "the queue tools were offered for this phrasing")
+    if worked < 2:
+        return R, "worked %s ticket(s); the request says 'for each one'" % worked
+
+    in_queue, not_worked = q.get("in_queue"), q.get("not_worked") or 0
+    if not isinstance(in_queue, int) or worked + not_worked != in_queue:
+        return R, ("queue arithmetic does not close: %s worked + %s not worked "
+                   "!= %s in the queue" % (worked, not_worked, in_queue))
+
+    ok = {a["id"]: a for a in ctx.rest.list("KBArticle", limit=500)
+          if a.get("status") == "published" and a.get("visibility") == "public"}
+    drafts = f.get("drafts") or []
+    for d in drafts:
+        for aid in d.get("grounded_article_ids") or []:
+            if aid not in ok:
+                return R, ("%s cites an article that is not published and public"
+                           % d.get("ticket"))
+            if _band(ok[aid]) == "blocked":
+                return R, ("%s cites an article readers rate below half helpful"
+                           % d.get("ticket"))
+
+    # "just tell me that rather than guessing" - a ticket with no usable source
+    # must be reported, not quietly dropped.
+    escalated = q.get("to_escalate") or 0
+    if len(drafts) + escalated < worked:
+        return R, ("worked %d tickets but accounted for only %d (%d drafted, %d "
+                   "escalated); the rest were neither answered nor reported"
+                   % (worked, len(drafts) + escalated, len(drafts), escalated))
+
+    return A, ("worked %d of %d tickets from a request phrased in none of our "
+               "own words: %d drafted on sendable sources, %d reported as "
+               "unanswerable" % (worked, in_queue, len(drafts), escalated))

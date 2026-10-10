@@ -1,0 +1,19 @@
+# Graded run configuration (Release 8.1).
+#
+# timeout_minutes is 25 against a declared internal budget of 18 (see
+# SEAT15_BUDGET_MINUTES below): the runner stops STARTING tasks with 90 seconds
+# of its own budget left and finalises results.json itself, so the platform's
+# cap is a backstop rather than the thing that ends the run. A run killed at the
+# cap would still leave a valid file - results.json is rewritten atomically
+# after every task - but we would rather finish deliberately than be stopped.
+
+install = "pip install -r requirements.txt"
+run = "python -m seat15.harness.official"
+results = "results.json"
+# Suryodaya only for the first submission. They run once per instance listed,
+# so naming both doubles the wall clock against a per-run cap. Suryodaya is
+# also the harder book - 10 of 102 articles publishable, response-SLA not
+# computable - so it exercises the refusals that matter. Keystone goes back in
+# once a run has completed cleanly.
+instances = ["suryodaya"]
+timeout_minutes = 25

@@ -1,0 +1,5 @@
+# The harness and the agent use the standard library only: urllib for both the
+# AgentSwitch MCP/REST doors and the OpenAI-compatible model endpoint. Nothing
+# here is needed to RUN the graded harness; pytest is listed so the 21
+# hand-written unit tests can be run in the same environment.
+pytest>=7.0

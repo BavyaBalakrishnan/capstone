@@ -10,7 +10,7 @@ knowledge base, and tell me which will breach SLA."*
 
 | | |
 |---|---|
-| [`seat15/harness/`](seat15/harness/) | **The evaluation harness.** 20 tasks, 17 checkers, 6 fixtures, a two-arm experiment runner. Every checker reads the database; none reads the agent's prose. |
+| [`seat15/harness/`](seat15/harness/) | **The evaluation harness.** 21 tasks, 18 checkers, 6 fixtures, a two-arm experiment runner. Every checker reads the database; none reads the agent's prose. |
 | [`seat15/agent/`](seat15/agent/) | **The agent.** One loop, a fixed tool set, two policies — a fixed script and a model — over the same tools. All factual decisions live in `domain.py`, with no model in that file. |
 | [`tests/`](tests/) | 21 unit tests, hand-written by the team, not generated. |
 | [`HARNESS_STATUS.md`](HARNESS_STATUS.md) | **Start here for the harness.** What it does, what it has caught, what is still open. Written for someone who has not seen the code. |
@@ -63,7 +63,7 @@ python -m seat15.harness.grid --arms rules,llm   # both, and which tasks tell th
 
 ### Verifying it without credentials
 
-**Eight of the twenty tasks are fixture-backed and need no `.env`, no network
+**Eight of the twenty-one tasks are fixture-backed and need no `.env`, no network
 and no API key.** On a fresh clone, these two commands are the whole proof:
 
 ```bash
@@ -79,7 +79,7 @@ own assumptions:
 for t in b01 c01 g01 p01 r01 r02 r03 t01; do     python -m seat15.harness.runner --agent null --task $t; done   # 8/8 revise
 ```
 
-The remaining twelve tasks run against the live platform and need `.env`.
+The remaining thirteen tasks run against the live platform and need `.env`.
 
 **The number worth reading is not the pass rate.** It is which tasks separate the
 two arms. A task both arms pass tells you the task is not discriminating, not

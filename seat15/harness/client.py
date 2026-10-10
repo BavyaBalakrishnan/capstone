@@ -102,7 +102,12 @@ class Client(object):
         if instance not in HOSTS:
             raise ValueError("instance must be one of %s" % sorted(HOSTS))
         self.instance = instance
-        self.base = HOSTS[instance]
+        # AGENTSWITCH_BASE_URL wins when the platform supplies it. The graded
+        # run (Release 8.1) hands us a FRESH COPY of the instance at a URL it
+        # chooses, with a token instead of a password, so neither the host map
+        # nor .env can be assumed. Locally nothing is set and the map is used,
+        # which keeps every existing command working unchanged.
+        self.base = (os.environ.get("AGENTSWITCH_BASE_URL") or HOSTS[instance]).rstrip("/")
         self.allow_writes = allow_writes
         self._env = load_env(env_path)
         self._token = None
@@ -130,6 +135,12 @@ class Client(object):
 
     def login(self):
         if self._token:
+            return self._token
+        # A token handed to us outright, as the graded run does. There is no
+        # password to exchange and no login call to make.
+        supplied = os.environ.get("AGENTSWITCH_TOKEN")
+        if supplied:
+            self._token = supplied
             return self._token
         pw = self.cred("AS_PASSWORD_" + self.instance.upper())
         email = self.cred("AS_EMAIL")

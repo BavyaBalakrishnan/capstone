@@ -1,0 +1,12 @@
+{
+  "id": "h01_plain_english_queue",
+  "kind": "held_out",
+  "note": "Suggested by a team member who had NOT read seat15/agent/. Wording is theirs, unchanged.",
+  "instances": ["keystone"],
+  "mode": "read_only",
+  "prompt": "A few of the new requests mention customers having trouble with a feature. Please check the available help articles and draft the first reply for each one. If the information we have doesn't actually explain how to fix the problem, just tell me that rather than guessing.",
+  "verifier": "seat15.harness.verifiers.seat15:works_the_queue_in_plain_english",
+  "checks": "More than one ticket is worked; the counts close; every drafted reply cites a publishable, acceptably-rated article; and any ticket with no usable source is reported rather than quietly dropped.",
+  "source": "held out - written by someone outside the agent's code",
+  "why": "Every other task in this suite is phrased in the words our own code matches, because we wrote both sides. This one is not. On its first run both arms handled ONE ticket and stopped: the loop hid the queue tools unless the request used one of our phrases, and this person wrote 'new requests' and 'each one'. The model understood it fine - given the tools it walked the queue and drafted four replies. We had taken the capability away and read the result as a model failure. This task stays so that cannot happen again unnoticed."
+}

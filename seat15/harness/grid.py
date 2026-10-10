@@ -42,6 +42,18 @@ ARMS = {
     "llm_noslaguard": {"agent": "llm", "env": {"SEAT15_NO_SLA_GUARD": "1"},
                        "about": ("the same model, with the loop no longer asking for "
                                  "the SLA half of a request that names it.")},
+    "llm_nooutcomeguard": {"agent": "llm",
+                           "env": {"SEAT15_NO_OUTCOME_GUARD": "1"},
+                           "about": ("the same model, with the loop no longer "
+                                     "challenging an 'answered' that drafted "
+                                     "nothing.")},
+    "llm_oldbudget": {"agent": "llm", "env": {"SEAT15_RESULT_BUDGET": "3000"},
+                      "about": ("the same model with the old 3,000-character result "
+                                "budget, before the clipping fix raised it.")},
+    "llm_nowholebook": {"agent": "llm", "env": {"SEAT15_WHOLE_BOOK_LIMIT": "0"},
+                        "about": ("the same model WITHOUT the whole sendable book in "
+                                  "the kb_candidates result - back to the ranked "
+                                  "shortlist only.")},
     "llm_noallkb": {"agent": "llm", "env": {"SEAT15_HIDE_TOOLS": "kb_all_sendable"},
                     "about": ("the same model WITHOUT the new whole-knowledge-base "
                               "tool, so only that one thing differs. The control.")},
@@ -49,9 +61,11 @@ ARMS = {
                         "about": ("the same model, with the loop no longer making it "
                                   "read the knowledge base before refusing a request "
                                   "that asks for an answer from it.")},
-    "llm_offerall": {"agent": "llm", "env": {"SEAT15_OFFER_ALL_TOOLS": "1"},
-                     "about": ("the same model offered EVERY tool on every request, "
-                               "instead of only the tools the request could use.")},
+    "llm_phrasefilter": {"agent": "llm",
+                         "env": {"SEAT15_FILTER_TOOLS_BY_PHRASE": "1"},
+                         "about": ("the same model with the OLD behaviour: queue "
+                                   "tools hidden unless the request uses one of our "
+                                   "own phrases.")},
     "llm_noqueuetools": {"agent": "llm",
                          "env": {"SEAT15_HIDE_TOOLS": "triage_queue,write_reply"},
                          "about": ("the same model with the two queue tools hidden. "

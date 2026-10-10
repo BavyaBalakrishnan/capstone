@@ -136,6 +136,15 @@ def main(argv=None):
                 verdict, reason = "error", "run failed: %r" % e
 
         if verdict == "unevaluated":
+            # WHY it could not be judged decides whether it is excusable. A
+            # premise the platform has fixed is not the same as our run dying,
+            # and the graded run of 2026-10-10 reported both with the same
+            # sentence - "their premise is gone" - for nine tasks, eight of
+            # which had simply run out of the platform's token allowance. Five
+            # of those were fixture tasks that need no model at all. The
+            # message was written for the one true case and applied to all of
+            # them. That is the same mistake this harness has caught four times
+            # elsewhere: absent evidence reported as a specific finding.
             # Our own rule, applied to our own score: a run that cannot be
             # judged never counts as a pass, and it does not count as a failure
             # either - it leaves the denominator. These are tasks whose premise
@@ -144,8 +153,10 @@ def main(argv=None):
             # someone else's improvement, and reporting them true would claim a
             # pass we did not earn. The summary names every one, so nothing is
             # hidden by leaving it out.
-            unjudged.append((task["id"], (reason or "")[:120]))
-            print("  %-44s unevaluated (left out of the score)" % task["id"][:44])
+            why = "premise" if "premise gone" in (reason or "") else "broke"
+            unjudged.append((task["id"], why, (reason or "")[:160]))
+            print("  %-44s unevaluated: %s" % (task["id"][:44],
+                                               (reason or "")[:60]))
             doc = {"tasks": rows, "summary": _summary(rows, skipped, instance,
                                                       model, unjudged)}
             _write(RESULTS, doc)
@@ -178,10 +189,15 @@ def _summary(rows, skipped, instance, model, unjudged=()):
         parts.append("no model was available, so this is the fixed-script arm")
     if skipped:
         parts.append("%d not reached in the time budget" % len(skipped))
-    if unjudged:
-        parts.append("%d task(s) left out because their premise is gone and they "
-                     "cannot be judged either way (%s)"
-                     % (len(unjudged), ", ".join(t for t, _ in unjudged)))
+    gone = [t for t, why, _ in unjudged if why == "premise"]
+    broke = [t for t, why, _ in unjudged if why != "premise"]
+    if gone:
+        parts.append("%d task(s) left out because the defect they test has been "
+                     "FIXED on the platform, so they cannot be judged either "
+                     "way (%s)" % (len(gone), ", ".join(gone)))
+    if broke:
+        parts.append("%d task(s) DID NOT COMPLETE - this is our run failing, not "
+                     "the agent, and not a pass: %s" % (len(broke), ", ".join(broke)))
     return "; ".join(parts)
 
 

@@ -40,6 +40,12 @@ REPEAT_LIMIT = 2
 # 3,000 the model saw 5 of 25 articles and was not told the rest existed.
 RESULT_BUDGET = int(os.environ.get("SEAT15_RESULT_BUDGET") or 14000)
 
+# What an OLDER result is shortened to, and how many steps are kept at all.
+# These two numbers are the difference between a run that finishes inside a
+# token allowance and one that stops two-thirds of the way through.
+OLD_RESULT_BUDGET = int(os.environ.get("SEAT15_OLD_RESULT_BUDGET") or 450)
+HISTORY_WINDOW = int(os.environ.get("SEAT15_HISTORY_WINDOW") or 8)
+
 # Phrases that make a request about MORE THAN ONE ticket. One list, used by the
 # baseline to pick its plan and by the model's prompt to decide which tools are
 # worth offering. Stated once so the two arms cannot drift apart.
@@ -861,12 +867,34 @@ class LLMPolicy(object):
     def next(self, prompt, history, results, steps_left):
         msgs = [{"role": "system", "content": self._system(prompt)},
                 {"role": "user", "content": prompt}]
-        for h in history:
+        # Only the MOST RECENT result is sent in full. Older ones are context,
+        # not the thing being acted on, and sending them all at full size costs
+        # quadratically: history is re-sent every step, so N steps at B bytes
+        # each is N*(N+1)/2 * B.
+        #
+        # Measured on the graded run of 2026-10-10: at a 14,000-character
+        # budget per result, nine tasks consumed 299,813 tokens of the
+        # platform's allowance and the remaining eight never ran. Our own
+        # arithmetic predicted 323,000 - we had measured that budget's effect on
+        # correctness and never once on cost.
+        #
+        # S18Code, the harness this one is modelled on, avoids the same trap
+        # two ways: `history[-8:]` and a 500-character tail for command output.
+        # Both are used here.
+        window = history[-HISTORY_WINDOW:]
+        for i, h in enumerate(window):
+            budget = RESULT_BUDGET if i == len(window) - 1 else OLD_RESULT_BUDGET
             msgs.append({"role": "assistant",
                          "content": json.dumps({"tool": h["tool"], "args": h["args"]})})
             msgs.append({"role": "user",
                          "content": "RESULT " + json.dumps(
-                             _clip(h["result"], RESULT_BUDGET), default=str)})
+                             _clip(h["result"], budget), default=str)})
+        if len(history) > HISTORY_WINDOW:
+            msgs.append({"role": "user", "content":
+                         "(%d earlier step(s) omitted. What you have already done "
+                         "is in the results above; if you need something from "
+                         "before that, call the tool again.)"
+                         % (len(history) - HISTORY_WINDOW)})
         if steps_left <= 1:
             msgs.append({"role": "user", "content":
                          "You are out of steps. Finish now with a done object."})

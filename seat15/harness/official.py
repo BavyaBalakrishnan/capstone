@@ -43,8 +43,19 @@ RESERVE_SECONDS = 90
 
 
 def _budget():
+    """How long we allow ourselves, against the cap declared in the toml.
+
+    Raised from 18 to 26 minutes on 2026-10-13. A dry run finished 14 of 17
+    tasks in 17m27s and skipped three for no reason other than our own budget
+    being seven minutes tighter than the platform's cap. Per-task time varies
+    with model latency - the same suite took 47s a task one day and 75s the
+    next - so the margin has to absorb that rather than fit the fastest day.
+
+    The toml declares 30 (their maximum), so 26 leaves four minutes for the
+    runner to finalise results.json itself rather than be killed mid-write.
+    """
     mins = os.environ.get("SEAT15_BUDGET_MINUTES")
-    return float(mins) * 60 if mins else 18 * 60.0
+    return float(mins) * 60 if mins else 26 * 60.0
 
 
 def _write(path, doc):

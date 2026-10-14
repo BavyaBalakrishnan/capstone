@@ -100,6 +100,40 @@ Three things we did because **you only get one run every 3 days**:
 
 ---
 
+## 2a. We ran it on the platform's server — 14 of 15 passed
+
+On 13 October the platform ran our harness on **their** machine, with **their**
+AI model, against a throwaway copy of Suryodaya. That is the first time anyone
+outside the team has measured us.
+
+```
+14 of 15 judged tasks passed
+ 1 failed            (i04)
+ 1 did not finish    (t01)
+ 1 left out          (i02 - the defect it tests has been fixed on the platform)
+```
+
+**Both problems were ours, not the AI's**, and both are now fixed:
+
+**`i04`** — a customer asks about a stock shortage. Fifteen articles cover
+shortages and none can be sent; eight unrelated ones can. Their AI picked an
+unrelated one and drafted a reply. Our code **let it** — it checked the article
+was publishable and well-rated, and never checked it answered the question. It
+would happily reply to "my order is short" with "Warranty and returns".
+
+We had fixed this exact problem once before in a different function, then
+reopened it when we added a new one. Our AI happened not to make that mistake;
+theirs did. That is luck, not safety.
+
+**`t01`** — one task was taking **seven minutes** instead of 47 seconds,
+because a safety check couldn't "see" the test data properly and kept rejecting
+the AI's attempts to finish. It said "done" fourteen times and was refused every
+time. That single task was why the run ran out of time.
+
+**The real lesson:** both bugs existed for days while our own tests passed 23
+out of 23. One needed a different AI to show up; the other needed someone else's
+clock. **Neither was visible from inside.**
+
 ## 3. Two things that were broken, and are now fixed
 
 Both are worth reading, because *how* they were wrong matters more than that
@@ -169,6 +203,17 @@ in the words our own code looks for, because we wrote both sides.
 failed them. Twice in one day. Every fix was reasonable on its own, but we
 cannot see our own blind spots — that is what "blind spot" means.
 
+This is no longer a theory. **Three times now, something outside the team found
+what we could not:**
+
+| Who | What they found |
+|---|---|
+| A teammate's wording | Our code only recognised our own words, so ordinary English silently did a fraction of the job |
+| The platform's own assistant | We had been answering a different question than the one the seat was asked |
+| The graded run | A customer could be sent an article that answers a question they never asked |
+
+Each one existed for days while our own tests passed everything.
+
 **The AI model is a preview build.** It can change without notice, and we have
 now watched two tasks flip under the same model name. Any score we report has an
 asterisk until a stable model is pinned.
@@ -212,6 +257,13 @@ nobody. Nothing on the platform would stop it.
 ---
 
 ## 5a. Before you press "Submit for a run"
+
+**One run every 3 days**, so it is worth 20 minutes of checking first. The last
+two runs both taught us something expensive: the first ran out of tokens
+two-thirds through, the second ran out of time because of the `t01` bug above.
+Both are fixed, but these books are shared and shift between runs, so a local
+dry-run on the day is cheap insurance.
+
 
 Everything is in place on `main` and tested from a clean copy with no
 passwords. Three things to do in the dialog:

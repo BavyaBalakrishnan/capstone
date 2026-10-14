@@ -232,6 +232,63 @@ phrasing."*
 If you read one thing in this document and act on it, make it this: **one
 paragraph from one outsider found what twenty of our own tasks could not.**
 
+## 5b. The graded run, and what it found that we could not
+
+On 13 October the platform ran our harness on its own server, with its own
+model, against a throwaway copy of Suryodaya. **14 of 15 judged tasks passed.**
+One task failed, one did not finish, and both were our fault rather than the
+model's.
+
+### i04 — we had reopened a hole we already closed
+
+A customer asks about a stock shortage. Fifteen articles cover shortages and
+**none is publishable**; eight unrelated ones are. Their model picked a
+sendable one and drafted a reply. Ours never does, so we had never seen it.
+
+`write_reply` allowed it. It checked the article **may be sent** and **is not
+badly rated** — and never checked it had anything to do with the question. It
+will cheerfully answer "my order is short" with *"Warranty and returns on
+SuryaTools products"*, marked sendable and preferred.
+
+We closed this exact hole once before, in `kb_candidates`, after the agent
+would have substituted whatever was sendable when the right articles were
+locked. `write_reply` was added later for the queue walk and **reopened it
+through a different door.** Our model happened not to walk through it. Theirs
+did. That is luck, not safety.
+
+### t01 — a guard that could not see through a fixture
+
+The live client records a read one way; the fixture client records it another.
+The look-before-refusing guard checked only one of them, so **on every fixture
+task the loop believed the knowledge base had never been opened** and refused
+"done" until the step budget ran out.
+
+```
+t01 before:  419 seconds, 18 model calls, "done" rejected fourteen times
+t01 after:    47 seconds,  4 model calls
+```
+
+That one task was the entire reason a graded run could not finish. Second time
+a fixture disagreeing with the platform has cost us a run.
+
+### Why this matters more than the score
+
+**Both bugs existed for days while our own suite passed 23 of 23.** One needed
+a different model to surface; the other needed someone else's clock. Neither
+was visible from inside.
+
+That is the same lesson as the task a team member wrote without reading our
+code — now three times over, from three directions:
+
+| Found by | What it exposed |
+|---|---|
+| A teammate's wording | We matched our own vocabulary and called the result a model failure |
+| The platform's own assistant | We had been answering a different question than the one asked |
+| The graded run | A customer-facing hole our model happened not to walk through |
+
+Our suite is good at catching what we thought to check. It cannot catch what we
+did not.
+
 ## 6. What the harness has actually caught
 
 Not theory. Everything here was found by running it.

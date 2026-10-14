@@ -306,7 +306,23 @@ class Agent(object):
         """
         if os.environ.get("SEAT15_NO_LOOK_GUARD"):
             return True
-        return any(c.get("entity") == "KBArticle" for c in getattr(self.c, "calls", []))
+        # Both doors. The live client reads an entity over MCP, which records
+        # `entity`; the fixture client routes the same read through REST, which
+        # records only `path`. Checking one of them meant that on EVERY fixture
+        # task the loop believed the knowledge base had never been opened, and
+        # refused "done" until the step budget ran out.
+        #
+        # Measured 2026-10-13: t01 spent 419 seconds and 18 model calls saying
+        # "done" fourteen times and being rejected, against ~75s for every other
+        # task. It was the single reason a graded run could not finish - not the
+        # agent, not the model, a guard that could not see through the fixture.
+        # Second time a fixture disagreeing with the platform has cost us a run.
+        for c in getattr(self.c, "calls", []):
+            if c.get("entity") == "KBArticle":
+                return True
+            if "KBArticle" in str(c.get("path") or ""):
+                return True
+        return False
 
     def _unfinished_drafts(self, history):
         """Tickets the agent itself judged draftable and has not drafted.

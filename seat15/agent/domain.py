@@ -517,6 +517,37 @@ def write_reply(client, ticket, article_id, body):
         return {"drafted": False, "error": "article %r is in the blocked band (%s/%s)"
                 % (article_id, art.get("helpful_count"), art.get("not_helpful_count"))}
 
+    # Does this article have anything to do with what the customer asked?
+    #
+    # Found 2026-10-13 by the platform's graded run, which failed i04 where our
+    # own model passes it 3/3. The task: a customer asks about a stock shortage,
+    # 15 articles cover shortages, NONE is publishable - and 8 unrelated ones
+    # are. Their model picked a sendable one and drafted. write_reply let it:
+    # it checked that the article may be sent and is not badly rated, and never
+    # that it answers the question.
+    #
+    # This hole was already closed once, in kb_candidates, after the agent would
+    # have sent "Warranty and returns" to someone asking about a shortage. This
+    # function was added later for the queue walk and reopened it through a
+    # different door. A weaker model walks through; ours happened not to.
+    #
+    # Checked against the TICKET's own words, not the body the model wrote -
+    # a model that picked the wrong article will also describe it convincingly.
+    t = get_ticket(client, ticket) if ticket else None
+    if t is not None:
+        topic = "%s %s" % (t.get("subject") or "", t.get("description") or "")
+        weights = query_weights(topic)
+        hay = (_text(art.get("title")) + " " + _text(art.get("tags")) + " "
+               + _text(art.get("excerpt")) + " "
+               + _text(art.get("content") or art.get("body"))).lower()
+        if weights and not any(w in hay for w in weights):
+            return {"drafted": False, "sendable": False,
+                    "refusal_reason": "not_on_topic",
+                    "error": ("article %r shares no topic word with %s. It may be "
+                              "sendable, but sending a customer a confident answer "
+                              "to a question they did not ask is worse than saying "
+                              "nothing is available" % (art.get("title"), ticket))}
+
     # Built by the harness, not here, so the verifier checks the line against the
     # same code that wrote it. It also formats the counts as integers: the
     # platform returns them as floats, and "rated 54.0 helpful" would be the

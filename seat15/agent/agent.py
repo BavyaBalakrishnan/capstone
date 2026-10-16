@@ -508,6 +508,56 @@ class Agent(object):
         # Out of steps. Record what we have, marked incomplete — never guess an outcome.
         return self._finish("incomplete", "ran out of steps before deciding", "max_steps")
 
+    def _settle_sendable(self, finding):
+        """Re-derive `sendable` from the article rows, as the finding is saved.
+
+        Recommended by the platform's review of our 13 October graded run, and
+        it is a better rule than the one we had. `draft_reply` returns
+        sendable=True whenever ANY sendable article scores a match - so on i04,
+        where all fifteen shortage articles are internal and eight unrelated
+        ones are publishable, a query that brushes one of those eight produces a
+        sendable reply to a question nobody asked.
+        
+        We already refuse to GROUND a reply in an unsendable article. What we
+        did not do was re-check the claim at the moment it is written down. The
+        finding is the thing that gets graded and read; a claim in it should be
+        derived from rows, not inherited from whichever tool last spoke.
+        
+        Nothing cited => nothing was sent, so "answered" is not available.
+        """
+        reply = finding.get("reply")
+        if not isinstance(reply, dict):
+            return
+        ids = [i for i in (reply.get("grounded_article_ids") or []) if i]
+        if not ids:
+            reply["sendable"] = False
+            if finding.get("outcome") == "answered":
+                finding["outcome"] = "escalated"
+                finding["outcome_corrected"] = ("nothing was cited, so no reply "
+                                                "reached a customer")
+            return
+        try:
+            rows = {a.get("id"): a for a in self.c.rows("KBArticle")}
+        except Exception:
+            return          # cannot verify; leave the tool's answer alone
+        bad = []
+        for i in ids:
+            a = rows.get(i)
+            if a is None:
+                bad.append("%s (no such article)" % i)
+            elif a.get("status") != "published" or a.get("visibility") != "public":
+                bad.append("%s (%s/%s)" % (i, a.get("status"), a.get("visibility")))
+            elif domain.rating_band(a.get("helpful_count"),
+                                    a.get("not_helpful_count")) == "blocked":
+                bad.append("%s (rated below half helpful)" % i)
+        reply["sendable"] = not bad
+        if bad:
+            reply["not_sendable_because"] = bad[:4]
+            if finding.get("outcome") == "answered":
+                finding["outcome"] = "escalated"
+                finding["outcome_corrected"] = ("cited %d article(s) that may not "
+                                                "be sent" % len(bad))
+
     def _recheck(self):
         # A test fixture can pin a change to this exact moment - after the agent
         # has decided, before it files - which is the race the brief warns about.
@@ -562,6 +612,7 @@ class Agent(object):
                        "acting on what was read." % (conflict.get("ticket"),
                                                      ", ".join(conflict.get("fields") or [])))
         finding = assemble_finding(self.results, outcome, summary, conflict=conflict)
+        self._settle_sendable(finding)
         rec = domain.record_finding(self.c, self.run_id, finding)
         self.trace({"event": "finding", "finding": finding, "record": rec})
         # Counters, not flags. A run where one tool call in twelve failed is not

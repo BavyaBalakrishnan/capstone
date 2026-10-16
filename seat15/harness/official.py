@@ -42,6 +42,28 @@ RESULTS = os.environ.get("SEAT15_RESULTS") or "results.json"
 RESERVE_SECONDS = 90
 
 
+def _expensive(task):
+    """How many model calls this task typically needs.
+
+    Read from the task file, where it was recorded from our own run history,
+    rather than guessed from the prompt. A first version inferred it from the
+    wording and was wrong three ways: it flagged i01 and t01 as costly (4 calls
+    each) and would have missed s02, the single most expensive task at 12. The
+    number is written down so that when it drifts, someone can see it is wrong.
+    """
+    return task.get("model_calls_median") or 0
+
+
+def _token_budget():
+    """Stop starting tasks near the allowance, the way we do for time.
+
+    The platform raised the cap to 500k after our 13 October run hit the old
+    300k one. A ceiling we cannot see is still a ceiling, so the runner keeps
+    its own count and stops deliberately rather than being refused mid-task.
+    """
+    return int(os.environ.get("SEAT15_TOKEN_BUDGET") or 420000)
+
+
 def _budget():
     """How long we allow ourselves, against the cap declared in the toml.
 
@@ -99,6 +121,13 @@ def main(argv=None):
 
     tasks = [t for t in runner.load_tasks(None)
              if instance in t["instances"] or t.get("fixture")]
+    # Cheapest first. Recommended by the platform's review: if anything runs
+    # out, the tasks lost should be the few expensive ones, not everything
+    # alphabetically after the point of failure. On 13 October the run died at
+    # t01 - last alphabetically - having spent its allowance on a queue walk.
+    # A queue task reads every open ticket and calls the model per ticket; the
+    # rest are a handful of calls.
+    tasks.sort(key=lambda t: (_expensive(t), t["id"]))
     clients = runner.LazyClients()
 
     model = None
@@ -113,9 +142,13 @@ def main(argv=None):
 
     stamp = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
     rows, skipped, unjudged = [], [], []
+    spent = [0]            # tokens, counted as we go
     for task in tasks:
         inst = instance if instance in task["instances"] else "fixture"
         if time.time() > deadline - RESERVE_SECONDS:
+            skipped.append(task)
+            continue
+        if spent[0] > _token_budget():
             skipped.append(task)
             continue
 
@@ -143,6 +176,12 @@ def main(argv=None):
                                       stamp + "-llm", clients, model=model)
                 row = runner.judge(d, clients)
                 verdict, reason = row["verdict"], row.get("reason")
+                try:
+                    res = json.load(open(os.path.join(d, "result.json"),
+                                         encoding="utf-8"))
+                    spent[0] += (res.get("health") or {}).get("tokens") or 0
+                except Exception:
+                    pass
             except Exception as e:
                 verdict, reason = "error", "run failed: %r" % e
 

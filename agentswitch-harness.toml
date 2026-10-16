@@ -10,10 +10,9 @@
 install = "pip install -r requirements.txt"
 run = "python -m seat15.harness.official"
 results = "results.json"
-# Suryodaya only for the first submission. They run once per instance listed,
-# so naming both doubles the wall clock against a per-run cap. Suryodaya is
-# also the harder book - 10 of 102 articles publishable, response-SLA not
-# computable - so it exercises the refusals that matter. Keystone goes back in
-# once a run has completed cleanly.
-instances = ["suryodaya"]
+# BOTH, from 2026-10-16. Listing only suryodaya meant the Keystone run graded
+# the Suryodaya task set, so four Keystone-only tasks had never been graded at
+# all - including d03 and h01, two of the four that separate our agent from a
+# no-model baseline. Naming one instance did not save a run; it wasted one.
+instances = ["suryodaya", "keystone"]
 timeout_minutes = 30

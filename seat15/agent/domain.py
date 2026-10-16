@@ -15,6 +15,7 @@ import datetime
 import json
 import os
 import re
+import time
 
 from seat15.harness.client import PROTECTED_ENTITIES
 from seat15.harness.verify import (BLOCK_BELOW, FINDING_PREFIX, MIN_VOTES,
@@ -876,10 +877,29 @@ def record_finding(client, run_id, finding):
     """
     payload = dict(finding, run_id=run_id,
                    recorded_at=datetime.datetime.utcnow().isoformat() + "Z")
-    sc, err = client.call("AgentMemory.create", {
+    args = {
         "content": FINDING_PREFIX + json.dumps(payload, sort_keys=True, default=str),
         "category": "fact", "source": "system", "importance": 0.5, "is_active": True,
-    })
-    if err:
-        return {"recorded": False, "error": err}
-    return {"recorded": True, "agent_memory_id": (sc or {}).get("id"), "run_id": run_id}
+    }
+    # Retried, because this is the single write the whole run exists to make.
+    # On the Keystone graded run of 2026-10-16 four tasks were scored zero for
+    # "no finding recorded in AgentMemory" - the work was done, the conclusion
+    # was reached, and one refused write threw it away. We made that write once
+    # and gave up.
+    #
+    # Size is not the cause: AgentMemory accepts 40,000 characters and a finding
+    # is about 5,000. The cause is still unknown, which is exactly why a single
+    # attempt was the wrong number.
+    last = None
+    for attempt in range(3):
+        try:
+            sc, err = client.call("AgentMemory.create", args)
+        except Exception as e:
+            last, sc, err = repr(e), None, repr(e)
+        if not err:
+            return {"recorded": True, "agent_memory_id": (sc or {}).get("id"),
+                    "run_id": run_id, "attempts": attempt + 1}
+        last = err
+        if attempt < 2:
+            time.sleep(2 * (attempt + 1))
+    return {"recorded": False, "error": last, "attempts": 3}

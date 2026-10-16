@@ -385,6 +385,7 @@ class Agent(object):
         return TOOLS[tool]["fn"](args, self.c)
 
     def run(self, prompt):
+        self._prompt = prompt
         # Preflight is not left to the policy. An agent that is switched off or out
         # of budget must stop before it reads anything, and that must not depend on
         # a model choosing to check.
@@ -539,6 +540,49 @@ class Agent(object):
         # Out of steps. Record what we have, marked incomplete — never guess an outcome.
         return self._finish("incomplete", "ran out of steps before deciding", "max_steps")
 
+    def _refuse_when_topic_is_locked(self, finding):
+        """If the answers to THIS request exist but none may be sent, send none.
+
+        The rule our domain code already applies to a query, applied to the
+        request as it was given rather than to whatever the model reworded it
+        to. On i04 - fifteen articles about shortages, none publishable, eight
+        publishable articles about clamps and surface plates - kb_candidates on
+        the original request answers `not_publishable`. The model is free to
+        search however it likes; it is not free to turn "the answer is locked"
+        into "here is something else".
+
+        Checked against every live task before trusting it: it fires on i04,
+        and on i01/s01/s03, which draft no reply at all so cannot be affected.
+        It does NOT fire on d01 or d02, where the right article shares none of
+        the question's words - which is why a keyword relevance test was the
+        wrong tool and this is not.
+
+        It does not fix d03, where the request has no locked topic and the
+        wrong article is simply a worse choice. That one stays judgement.
+        """
+        reply = finding.get("reply")
+        if not isinstance(reply, dict) or not reply.get("sendable"):
+            return
+        prompt = getattr(self, "_prompt", "") or ""
+        if not prompt:
+            return
+        try:
+            kb = domain.kb_candidates(self.c, prompt)
+        except Exception:
+            return
+        if kb.get("refusal_reason") != "not_publishable":
+            return
+        reply["sendable"] = False
+        reply["refusal_reason"] = "not_publishable"
+        reply["reason"] = kb.get("reason")
+        finding["flagged_for_review"] = kb.get("flag_for_review") or []
+        if finding.get("outcome") == "answered":
+            finding["outcome"] = "escalated"
+        finding["outcome_corrected"] = (
+            "the knowledge base answers this request, and none of those "
+            "articles may be sent; substituting a publishable article about "
+            "something else is not an answer")
+
     def _record_undrafted(self, finding):
         """Say plainly when tickets the triage marked answerable were not answered.
 
@@ -675,6 +719,7 @@ class Agent(object):
                                                      ", ".join(conflict.get("fields") or [])))
         finding = assemble_finding(self.results, outcome, summary, conflict=conflict)
         self._settle_sendable(finding)
+        self._refuse_when_topic_is_locked(finding)
         self._record_undrafted(finding)
         rec = domain.record_finding(self.c, self.run_id, finding)
         self.trace({"event": "finding", "finding": finding, "record": rec})

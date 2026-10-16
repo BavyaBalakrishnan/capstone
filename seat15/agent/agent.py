@@ -723,11 +723,28 @@ class Agent(object):
         self._record_undrafted(finding)
         rec = domain.record_finding(self.c, self.run_id, finding)
         self.trace({"event": "finding", "finding": finding, "record": rec})
+        # A finding that was not written is OUR failure, not the agent's.
+        #
+        # record_finding returns {"recorded": False, "error": ...} and does not
+        # raise, so until now a failed write was silent: the run looked healthy,
+        # the verifier found nothing in AgentMemory, and the task was scored as
+        # the agent getting the answer wrong. On the Keystone graded run of
+        # 2026-10-16 that cost four tasks - h01, q01, s02 and t01 - every one of
+        # them reported as "no finding recorded" and counted as a failure.
+        #
+        # This is the fourth time our own plumbing has been charged to the
+        # agent. It is now flagged like the others: degraded, so the run is
+        # reported as not judgeable rather than as a wrong answer.
+        if not (rec or {}).get("recorded"):
+            self._record_failed = ("could not write the finding to AgentMemory: %s"
+                                   % str((rec or {}).get("error"))[:200])
+            self.trace({"event": "finding_not_recorded", "reason": self._record_failed})
         # Counters, not flags. A run where one tool call in twelve failed is not
         # the same as one where the agent never reached the platform, and they
         # must not share a column (S18Code/harnesses/base.py).
         health = {"tool_calls": self.tool_calls, "tool_errors": self.tool_errors,
                   "policy_errors": self.policy_errors,
+                  "finding_recorded": bool((rec or {}).get("recorded")),
                   "transport_retries": getattr(self.c, "transport_retries", 0),
                   "transport_failures": getattr(self.c, "transport_failures", 0),
                   "model_calls": len(getattr(self.policy, "stats", []) or []),
@@ -741,7 +758,9 @@ class Agent(object):
                 # True when our own plumbing failed during the run. A degraded run
                 # must not be read as a wrong answer by the agent.
                 "degraded": bool(health["transport_failures"]
-                                 or (health["tool_errors"] - health["policy_errors"]))}
+                                 or not health["finding_recorded"]
+                                 or (health["tool_errors"] - health["policy_errors"])),
+                "degraded_reason": getattr(self, "_record_failed", None)}
 
 
 def _clip(obj, n=1500):

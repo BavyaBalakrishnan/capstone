@@ -35,6 +35,15 @@ from seat15.agent import domain
 MAX_STEPS = int(os.environ.get("SEAT15_MAX_STEPS") or 20)
 REPEAT_LIMIT = 2
 
+# How many times a guard may send the model back without charging a step. Past
+# this the rejections cost budget again, so a model that will not comply still
+# finishes rather than looping forever.
+TURNED_BACK_LIMIT = int(os.environ.get("SEAT15_TURNED_BACK_LIMIT") or 8)
+
+# How long one model call may spend being retried before the task is abandoned.
+# The whole run has a budget; one unlucky task must not spend it.
+RETRY_SECONDS = float(os.environ.get("SEAT15_RETRY_SECONDS") or 75)
+
 # Characters of a tool result the model is shown. Raised from 3,000 on
 # 2026-10-05: the whole sendable knowledge base is ~8,800 characters, and at
 # 3,000 the model saw 5 of 25 articles and was not told the rest existed.
@@ -386,7 +395,20 @@ class Agent(object):
             return self._finish("halted", "preflight: %s" % pre.get("reason"), "halted")
 
         history = []
-        for step in range(1, MAX_STEPS + 1):
+        # A "done" we send back is not work, and must not be charged to the
+        # budget the outstanding work needs. Measured 2026-10-16 on h01: five
+        # tickets were judged answerable, the finish guard refused "done" while
+        # the budget could still cover them, and each refusal cost a step - so
+        # after about fifteen the guard gave up exactly when it mattered and the
+        # run ended with five customers unanswered.
+        #
+        # Rejections are counted separately and capped, so a model that will not
+        # comply still terminates, but a model that WOULD comply is not denied
+        # the steps to do it.
+        turned_back = 0
+        step = 0
+        while step < MAX_STEPS:
+            step += 1
             left = MAX_STEPS - step
             action = self.policy.next(prompt, history, self.results, steps_left=left)
             self.trace({"event": "decide", "step": step, "action": action})
@@ -429,6 +451,9 @@ class Agent(object):
                         and not os.environ.get("SEAT15_NO_SLA_GUARD")
                         and re.search(r"sla|breach", prompt.lower())):
                     self.trace({"event": "sla_unanswered", "step": step})
+                    if turned_back < TURNED_BACK_LIMIT:
+                        turned_back += 1
+                        step -= 1          # not work; do not charge the budget
                     history.append({"tool": "__sla_guard__", "args": {},
                                     "result": {"error": SLA_GUARD}})
                     continue
@@ -445,6 +470,9 @@ class Agent(object):
                         and re.search(r"knowledge base|kb|article|draft a reply",
                                       prompt.lower())):
                     self.trace({"event": "refused_without_looking", "step": step})
+                    if turned_back < TURNED_BACK_LIMIT:
+                        turned_back += 1
+                        step -= 1          # not work; do not charge the budget
                     history.append({"tool": "__look_first__", "args": {},
                                     "result": {"error": LOOK_FIRST_GUARD}})
                     continue
@@ -465,6 +493,9 @@ class Agent(object):
                         chr(10) + "  write_reply(ticket=%r, article_id=%r, "
                                   "body=<your text>)" % (t, a)
                         for t, a in unfinished)
+                    if turned_back < TURNED_BACK_LIMIT:
+                        turned_back += 1
+                        step -= 1          # not work; do not charge the budget
                     history.append({"tool": "__finish_guard__", "args": {},
                                     "result": {"error": FINISH_GUARD % (
                                         len(unfinished), detail)}})
@@ -1010,7 +1041,22 @@ class LLMPolicy(object):
             payload["reasoning_effort"] = self.reasoning
         body = json.dumps(payload).encode()
         last = None
+        # A task that is going to fail should not take the budget other tasks
+        # need. Measured 2026-10-16 on Keystone: while the endpoint was
+        # returning "high demand", p01 took 280 seconds against a 15-second
+        # median and two tasks burned 150 and 177 seconds before crashing
+        # anyway. The run then had no time left for s02, which never ran.
+        #
+        # Retrying is still right - a blip should not lose a task - but past
+        # this much time the task is lost either way, and spending more only
+        # takes it from the tasks that could still succeed.
+        give_up_at = time.time() + RETRY_SECONDS
         for attempt in range(4):
+            if attempt and time.time() > give_up_at:
+                raise RuntimeError(
+                    "model endpoint %s still failing after %.0fs; giving up on "
+                    "this task so the rest of the run keeps its budget. Last "
+                    "error: %s" % (self.base, RETRY_SECONDS, last))
             req = urllib.request.Request(self.base + "/chat/completions", data=body,
                                          method="POST")
             req.add_header("Content-Type", "application/json")

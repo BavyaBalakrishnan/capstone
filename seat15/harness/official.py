@@ -39,7 +39,35 @@ from seat15.harness.client import Client
 RESULTS = os.environ.get("SEAT15_RESULTS") or "results.json"
 # Stop STARTING work with this much of the budget left, so the file is always
 # finalised by us rather than by a kill signal.
+#
+# A flat 90 seconds was not enough. Measured 2026-10-16 on Keystone: the runner
+# stopped starting tasks at its 26-minute budget and the task already in flight
+# ran another three minutes, finishing at 29 against a 30-minute cap. We were
+# starting work we could not finish, and only the atomic write of results.json
+# kept that from costing the whole run.
+#
+# The reserve is now whatever the NEXT task is likely to need, measured from
+# how long this run's own tasks have actually taken, with a floor. A cheap task
+# can start late; an expensive one may not.
 RESERVE_SECONDS = 90
+
+
+def _likely_seconds(task, done, started):
+    """How long this task will probably take, from this run's own pace.
+
+    Uses the recorded median model-call count as the unit of work: a task with
+    twice the calls takes roughly twice as long. Falls back to a flat estimate
+    before anything has finished.
+    """
+    if not done:
+        return 240.0
+    elapsed = time.time() - started
+    units = sum(max(1, _expensive(t)) for t in _DONE_TASKS) or len(done)
+    per_unit = elapsed / float(units)
+    return per_unit * max(1, _expensive(task)) * 1.25      # 25% headroom
+
+
+_DONE_TASKS = []
 
 
 def _expensive(task):
@@ -145,7 +173,8 @@ def main(argv=None):
     spent = [0]            # tokens, counted as we go
     for task in tasks:
         inst = instance if instance in task["instances"] else "fixture"
-        if time.time() > deadline - RESERVE_SECONDS:
+        reserve = max(RESERVE_SECONDS, _likely_seconds(task, rows, started))
+        if time.time() > deadline - reserve:
             skipped.append(task)
             continue
         if spent[0] > _token_budget():
@@ -211,6 +240,7 @@ def main(argv=None):
                                                       model, unjudged)}
             _write(RESULTS, doc)
             continue
+        _DONE_TASKS.append(task)
         rows.append(_row(task, inst, verdict, reason, baseline=base_verdict))
         doc = {"tasks": rows, "summary": _summary(rows, skipped, instance, model, unjudged)}
         _write(RESULTS, doc)

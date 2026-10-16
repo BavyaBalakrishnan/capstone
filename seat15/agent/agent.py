@@ -508,6 +508,37 @@ class Agent(object):
         # Out of steps. Record what we have, marked incomplete — never guess an outcome.
         return self._finish("incomplete", "ran out of steps before deciding", "max_steps")
 
+    def _record_undrafted(self, finding):
+        """Say plainly when tickets the triage marked answerable were not answered.
+
+        The finish guard refuses "done" while draftable tickets have no reply,
+        but only while the step budget could still cover them - and every
+        rejected "done" costs a step, so a model that keeps insisting wears the
+        guard out. The graded run of 2026-10-16 ended that way on Keystone:
+        eight tickets worked, five marked draftable, none drafted, and the
+        finding showed three escalated with five simply unaccounted for.
+
+        The tempting fix is to relabel those five as escalated. That would make
+        the arithmetic close and hide the fact that five customers got nothing.
+        The agent failed; the finding should say so, and the task should keep
+        failing us until the agent stops doing it.
+        """
+        q = self.results.get("triage_queue") or {}
+        rows = q.get("tickets") or []
+        if not rows:
+            return
+        written = {d.get("ticket") for d in (self.results.get("drafts") or [])
+                   if d.get("drafted")}
+        missed = [r.get("ticket") for r in rows
+                  if r.get("decision") == "draft" and r.get("ticket") not in written]
+        if missed:
+            finding["draftable_not_drafted"] = len(missed)
+            finding["draftable_not_drafted_tickets"] = missed[:8]
+            finding["accounting_note"] = (
+                "%d ticket(s) were judged answerable and got no reply. They are "
+                "NOT counted as escalated: nobody has looked at them and no "
+                "customer was answered." % len(missed))
+
     def _settle_sendable(self, finding):
         """Re-derive `sendable` from the article rows, as the finding is saved.
 
@@ -613,6 +644,7 @@ class Agent(object):
                                                      ", ".join(conflict.get("fields") or [])))
         finding = assemble_finding(self.results, outcome, summary, conflict=conflict)
         self._settle_sendable(finding)
+        self._record_undrafted(finding)
         rec = domain.record_finding(self.c, self.run_id, finding)
         self.trace({"event": "finding", "finding": finding, "record": rec})
         # Counters, not flags. A run where one tool call in twelve failed is not

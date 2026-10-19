@@ -71,6 +71,9 @@ ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 # HTTP 422, so 500 leaves room and costs one extra request per 500 rows.
 PAGE = 500
 
+# A backstop against a bad `total`. No table this seat reads is near it.
+HARD_CAP = 20000
+
 # One token per instance, shared by every Client in the process.
 #
 # `client_for` builds a fresh write-capable Client for every task, and the grid
@@ -246,12 +249,17 @@ class Client(object):
         must say so by name, so the runner can file it as "not judged - this is
         our run failing", a category that already exists and is honest.
 
-        It also pages. One request returned at most `limit` rows and the caller
-        could not tell a complete answer from a truncated one. AgentMemory
-        passed 500 rows on 2026-10-19 - it is append-only from this seat and
-        every run adds to it - so `list("AgentMemory", limit=500)` returned
-        exactly 500 of 680 and `ctx.finding()` could not find a row that was
-        there. The response carries `total`, so there is no excuse for guessing.
+        It also pages, and `limit` is the PAGE SIZE, not a ceiling. Every one of
+        the 26 call sites passes 500 and means "all rows"; none wants the first
+        500 of something longer.
+
+        AgentMemory passed 500 rows on 2026-10-19 - it is append-only from this
+        seat and every run adds to it - so `list("AgentMemory", limit=500)`
+        returned exactly 500 of 680 and `ctx.finding()` could not find a row
+        that was there. Paging was added that afternoon and still stopped at
+        `limit`, which fixed nothing: Suryodaya reached 703 rows the same
+        evening and the lookup truncated again at 500. The response carries
+        `total`, so there is no excuse for guessing or for stopping early.
         """
         extra = ["%s=%s" % kv for kv in filters.items()]
         rows = []
@@ -270,8 +278,12 @@ class Client(object):
             rows.extend(page)
             total = data.get("total")
             offset += len(page)
-            if not page or total is None or offset >= int(total) or offset >= limit:
+            if not page or total is None or offset >= int(total):
                 break
+            if offset >= HARD_CAP:
+                raise Transport(
+                    "GET /api/%s has served %d rows and reports %s; refusing to "
+                    "page further rather than loop" % (entity, offset, total))
         return rows
 
     def is_denied(self, path):

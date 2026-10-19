@@ -186,6 +186,24 @@ def run_one(task, instance, agent, stamp, clients, model=None, attempt=1):
         if OUR_FAULT.search(repr(e)):
             result["degraded"] = True
             result["degraded_reason"] = "model endpoint unavailable: %s" % _why(repr(e))
+        else:
+            # Any other exception escaping the agent is a defect in OUR code.
+            # The model returns text; it cannot raise. So this is never the
+            # agent answering wrongly, and scoring it as such misreports both
+            # the task and the cause.
+            #
+            # 2026-10-19: a self.trace call in LLMPolicy, which has no trace
+            # channel, raised AttributeError. h01, q01 and r02 were reported as
+            # "no finding recorded in AgentMemory" - which reads as the agent
+            # failing to file its conclusion, when in truth our own loop died
+            # before it could. Three tasks, charged to the agent, for one typo
+            # of ours.
+            #
+            # Degraded, so it leaves the denominator and is named in the
+            # summary as our run failing rather than counted as a pass or a
+            # loss. The exception is in the reason, so it stays loud.
+            result["degraded"] = True
+            result["degraded_reason"] = "the harness crashed: %s" % repr(e)[:200]
     result["calls"] = result.get("calls") or agent_client.calls
     for c in result["calls"]:
         trace(dict(c, event="call"))

@@ -812,7 +812,8 @@ class Agent(object):
                   "transport_retries": getattr(self.c, "transport_retries", 0),
                   "transport_failures": getattr(self.c, "transport_failures", 0),
                   "model_calls": len(getattr(self.policy, "stats", []) or []),
-                  "unusable_replies": getattr(self.policy, "unusable", 0)}
+                  "unusable_replies": getattr(self.policy, "unusable", 0),
+                  "unusable_retries": getattr(self.policy, "unusable_retries", 0)}
         return {"ended": ended if rec.get("recorded") else "finding_not_recorded",
                 "claimed_success": outcome == "answered",
                 "final_answer": summary, "outcome": outcome,
@@ -1075,6 +1076,7 @@ class LLMPolicy(object):
         self.reasoning = get("SEAT15_LLM_REASONING") or "low"
         self.stats = []
         self.unusable = 0   # replies with no parseable action, billed all the same
+        self.unusable_retries = 0   # re-asks that recovered one of those
         # Set once if the endpoint refuses `reasoning_effort`; see _chat.
         self._no_reasoning = bool(get("SEAT15_NO_REASONING_FIELD"))
         if not self.base or not self.model:
@@ -1179,8 +1181,12 @@ class LLMPolicy(object):
                 return action
             self.unusable += 1
             if attempt < UNUSABLE_RETRIES:
-                self.trace({"event": "reply_unusable_retrying",
-                            "attempt": attempt + 1, "reply": text[:160]})
+                # Counted, not traced: a policy has no trace channel. Calling
+                # self.trace here crashed h01, q01 and r02 on 2026-10-19, and
+                # the stub I checked the retry with supplied a trace method the
+                # real class does not have - so the test proved the logic and
+                # hid the call that broke it.
+                self.unusable_retries += 1
                 time.sleep(1.0 + attempt)
         return {"tool": None, "args": {}, "_unparsed": text[:300]}
 

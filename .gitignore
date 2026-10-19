@@ -13,3 +13,7 @@ runs/
 __pycache__/
 *.pyc
 .venv/
+
+# Dry-run output from tools/dryrun.sh. Same reason as runs/ and out/:
+# it quotes other teams' ticket subjects and customer names.
+runs_local/

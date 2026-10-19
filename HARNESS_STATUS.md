@@ -482,6 +482,54 @@ one task flip between runs under the same model name. Both results are recorded.
 
 ## 9. What is pending
 
+### A0. Where we stopped on 19 October, and what to do first
+
+**Suryodaya is submitted. Keystone is not, and finishing it is the only task
+blocking us.**
+
+Suryodaya is **16 of 16** locally on commit `2476665`, which is what `main`
+holds and what was submitted. Every failure found that day - `d01`, `i05`,
+`q01` - passes on it.
+
+Keystone has **not** been measured on that commit. Two different things stopped
+it, in order:
+
+1. A crash of ours, since fixed, killed `h01`, `q01` and `r02` mid-run.
+2. The model provider's quota was exhausted on every key we have. `t01` came
+   back `unevaluated: not judged: model endpoint unavailable: HTTP 429`, and a
+   fresh key returned 429 on the first call - so the limit is per project, not
+   per key.
+
+Of the Keystone run that did get through, 10 tasks were measured: 8 approve,
+`d03` revise, `i02` legitimately unevaluated. The six unmeasured ones include
+`h01` and `q01`, which are the two that decide whether Keystone is submittable.
+
+**To finish it, when quota allows:**
+
+```
+tools/dryrun.sh keystone
+```
+
+That script is in the repo because getting the invocation wrong is what wasted
+19 October: it mints **one** token, does not override `AGENTSWITCH_BASE_URL`,
+and runs a copy of the tree. Read its header before changing it - every line in
+there is paid for. Run one instance at a time; two compete for the same model
+key.
+
+Then, only if it comes back clean apart from `d03`, change **one line** in
+`agentswitch-harness.toml`:
+
+```toml
+instances = ["keystone"]
+```
+
+and push before submitting. That line decides what runs - the button in the UI
+does not. Listing the wrong instance there is how `d03` and `h01` went ungraded
+once already.
+
+**Expect `d03` to fail.** It is 2 of 4 on the pinned model and is deliberately
+unresolved; see its task file before touching it.
+
 ### A. Decisions we still need from the team
 
 | # | Question | What it blocks |
@@ -498,9 +546,22 @@ one task flip between runs under the same model name. Both results are recorded.
    far is ours, and we fixed our own tools after watching them fail — so our
    numbers are partly self-graded. This is the single most valuable thing anyone
    can contribute and it needs no decision at all.
-2. **Pin a stable model.** We are on a preview build that the provider can change
-   without telling us, and we have already watched a task flip under the same
-   model name. No score should be submitted on a preview model.
+2. ~~**Pin a stable model.**~~ **Done 19 October, and it was not optional.**
+   `gemini-3.1-flash-lite-preview` answered **0 of 8** probes that morning - all
+   503 - so the preview build had stopped being usable, not merely unstable. We
+   pinned `gemini-3.5-flash-lite` (8 of 8, 2.8s) and a full run went from 21
+   minutes to 11.
+
+   It has a measured cost, recorded here because it would otherwise look free:
+   `d03` was 10 of 10 on the preview build and is **2 of 4** on the pinned one.
+   `d03`'s own conclusion is that its lever is model quality, so it is the task
+   most sensitive to this change. The GA `gemini-3.1-flash-lite` is not an
+   escape - it was 0 of 6, all 503.
+
+   One thing this does **not** control: the graded run supplies its own
+   `OPENAI_MODEL`, so the platform picks the model there. If it hands us a dead
+   build, tasks return `unevaluated: not judged`, which is the harness being
+   honest rather than the agent failing.
 3. **A correction pass on `GAP_REPORT.md`.** Roughly eight figures in it are now
    stale — the tool count changed, `findings/001` was fixed, and some claims were
    re-derived and turned out weaker than written.

@@ -493,6 +493,14 @@ def all_sendable(client):
                      "answers the question, say so - you have seen all of them.")}
 
 
+def _ticket_query(client, ticket_ref):
+    """The ticket's own words, for choosing an article without the model's help."""
+    t = get_ticket(client, ticket_ref) if ticket_ref else None
+    if not t:
+        return ""
+    return "%s %s" % (t.get("subject") or "", t.get("description") or "")
+
+
 def write_reply(client, ticket, article_id, body):
     """Take the model's prose and attach a provenance line it cannot fake.
 
@@ -507,8 +515,33 @@ def write_reply(client, ticket, article_id, body):
     if not body:
         return {"drafted": False, "error": "empty body"}
     art = next((a for a in client.rows("KBArticle") if a.get("id") == article_id), None)
+    resolved_for = None
     if not art:
-        return {"drafted": False, "error": "no article %r" % article_id}
+        # The model was asked to carry a 36-character opaque id between two
+        # tool calls, and it does not. Keystone, 2026-10-19: triage chose
+        #   3a612a4d-64db-4d3c-8cc5-aee43afe02f4
+        # and write_reply was called with
+        #   3a612a4d-64db-40a8-b997-393b4fca626f
+        # - the same first fifteen characters, then invented. The call was
+        # correctly refused, the model abandoned that ticket and the two after
+        # it, and three customers went unanswered on a queue of eight.
+        #
+        # The standing rule covers this: anything the model must remember to do
+        # it will not do, and a UUID it must retype is the same bet with worse
+        # odds. So the id is a hint, not a requirement. When it does not name a
+        # real article this resolves the one the queue walk would have chosen
+        # anyway, from the ticket's own words, through the same kb_candidates
+        # every other path uses - so the sendable, band and topic rules still
+        # decide, and i04 still refuses when nothing may be sent.
+        if ticket:
+            picked = kb_candidates(client, _ticket_query(client, ticket))
+            if picked.get("usable"):
+                art = picked["usable"][0]
+                resolved_for = article_id or "(none supplied)"
+                article_id = art.get("id")
+        if not art:
+            return {"drafted": False, "error": "no article %r" % article_id,
+                    "refusal_reason": "no_coverage"}
     sendable = art.get("status") == "published" and art.get("visibility") == "public"
     band = rating_band(art.get("helpful_count"), art.get("not_helpful_count"))
     if not sendable:
@@ -556,6 +589,7 @@ def write_reply(client, ticket, article_id, body):
     provenance = provenance_line(art)
     return {"drafted": True, "sendable": True, "ticket": ticket,
             "grounded_article_ids": [article_id], "band": band,
+            "article_id_resolved_from": resolved_for,
             "body": body, "provenance": provenance,
             "text": body + chr(10) + chr(10) + provenance}
 

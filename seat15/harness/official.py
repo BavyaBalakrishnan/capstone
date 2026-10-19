@@ -244,6 +244,10 @@ def main(argv=None):
             # pass we did not earn. The summary names every one, so nothing is
             # hidden by leaving it out.
             why = "premise" if "premise gone" in (reason or "") else "broke"
+            # Counted towards the pace too: it consumed time, so leaving it
+            # out made every later task look slower than it is and the reserve
+            # skipped work there was time for.
+            _DONE_TASKS.append(task)
             unjudged.append((task["id"], why, (reason or "")[:160]))
             print("  %-44s unevaluated: %s" % (task["id"][:44],
                                                (reason or "")[:60]))

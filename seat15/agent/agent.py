@@ -1128,7 +1128,16 @@ class LLMPolicy(object):
                 req.add_header("Authorization", "Bearer " + self.key)
             t0 = time.time()
             try:
-                with urllib.request.urlopen(req, timeout=240) as r:
+                # Bounded by what is left of the retry budget, never more.
+                # The ceiling is only tested BETWEEN attempts, so a 240-second
+                # request made it decorative: on the Keystone dry run of
+                # 2026-10-19 one task spent sixteen minutes in four blocking
+                # attempts before the 75-second ceiling got a chance to fire,
+                # and the run then skipped eleven tasks for lack of time.
+                # A chat completion here takes about 17 seconds; 60 is already
+                # generous, and less when the budget is nearly spent.
+                wait = max(10.0, min(60.0, give_up_at - time.time()))
+                with urllib.request.urlopen(req, timeout=wait) as r:
                     data = json.loads(r.read())
                 self.stats.append({"secs": round(time.time() - t0, 1),
                                    "usage": data.get("usage"),

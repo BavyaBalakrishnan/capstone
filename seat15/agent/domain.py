@@ -324,6 +324,17 @@ def triage_queue(client, cap=None, status="new"):
             "not_worked": len(skipped), "cap": cap,
             "draftable": sum(1 for r in rows if r["decision"] == "draft"),
             "to_escalate": sum(1 for r in rows if r["decision"] == "escalate"),
+            # Every badly-rated public article this walk ran into, in one place.
+            #
+            # Each row already carries its own flag_for_review and nothing read
+            # them, so a queue walk found the bad articles and reported none.
+            # i05 failed on Suryodaya that way on 2026-10-19: the agent
+            # correctly refused to send an article rated 0 helpful / 51 not
+            # helpful and then left it public for the next person to hit. The
+            # refusal is half the job; saying which article needs fixing is the
+            # other half.
+            "flag_for_review": sorted({a for r in rows
+                                       for a in (r.get("flag_for_review") or [])}),
             "tickets": rows}
 
 

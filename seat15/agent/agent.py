@@ -195,6 +195,25 @@ def _policys_fault(tool, args, error):
     return False
 
 
+def _flag(finding, ids):
+    """Add articles needing review to the finding, never replacing what is there.
+
+    Each branch of assemble_finding used to ASSIGN this key, so whichever ran
+    last decided the answer and the others were discarded - and the queue-walk
+    branch assigned nothing at all, which is how i05 failed on Suryodaya on
+    2026-10-19: the walk found two badly-rated public articles, refused to send
+    them, and reported none for review.
+
+    This file already says why per-branch assignment is wrong - the finding
+    records what happened, not which tool produced it. A union says what
+    happened no matter which path got there.
+    """
+    if not ids:
+        return
+    have = finding.get("flagged_for_review") or []
+    finding["flagged_for_review"] = sorted(set(have) | set(ids))
+
+
 def assemble_finding(results, outcome, summary="", conflict=None):
     """Build the graded row from tool OUTPUTS. The policy supplies only `outcome`."""
     f = {"outcome": outcome, "summary": summary[:500]}
@@ -222,7 +241,7 @@ def assemble_finding(results, outcome, summary="", conflict=None):
         f["reply"] = {k: r.get(k) for k in ("drafted", "sendable",
                                             "grounded_article_ids",
                                             "refusal_reason", "reason")}
-        f["flagged_for_review"] = r.get("flag_for_review") or []
+        _flag(f, r.get("flag_for_review"))
     elif results.get("drafts"):
         # A reply written through write_reply rather than draft_reply. Found
         # 2026-10-10 on d01: the model grounded in exactly the right article,
@@ -239,14 +258,15 @@ def assemble_finding(results, outcome, summary="", conflict=None):
                       "sendable": bool(d.get("sendable")),
                       "grounded_article_ids": d.get("grounded_article_ids") or [],
                       "refusal_reason": None, "reason": None}
-        f["flagged_for_review"] = []
+        _flag(f, d.get("flag_for_review"))
     elif "kb_candidates" in results:
         k = results["kb_candidates"]
         f["reply"] = {"drafted": False, "sendable": False, "grounded_article_ids": [],
                       "refusal_reason": k.get("refusal_reason"), "reason": k.get("reason")}
-        f["flagged_for_review"] = k.get("flag_for_review") or []
+        _flag(f, k.get("flag_for_review"))
     if "triage_queue" in results:
         q = results["triage_queue"]
+        _flag(f, q.get("flag_for_review"))
         f["queue"] = {k: q.get(k) for k in ("status", "in_queue", "worked",
                                             "not_worked", "cap", "draftable",
                                             "to_escalate")}
@@ -505,6 +525,7 @@ class Agent(object):
                                     action.get("summary", ""), "done")
 
             tool, args = action.get("tool"), action.get("args") or {}
+            args = self._correct_article_id(tool, args)
             key = (tool, json.dumps(args, sort_keys=True))
             self.calls_by_key[key] = self.calls_by_key.get(key, 0) + 1
             if self.calls_by_key[key] > REPEAT_LIMIT:
@@ -575,13 +596,51 @@ class Agent(object):
         reply["sendable"] = False
         reply["refusal_reason"] = "not_publishable"
         reply["reason"] = kb.get("reason")
-        finding["flagged_for_review"] = kb.get("flag_for_review") or []
+        _flag(finding, kb.get("flag_for_review"))
         if finding.get("outcome") == "answered":
             finding["outcome"] = "escalated"
         finding["outcome_corrected"] = (
             "the knowledge base answers this request, and none of those "
             "articles may be sent; substituting a publishable article about "
             "something else is not an answer")
+
+    def _correct_article_id(self, tool, args):
+        """Replace a mistyped article id with the one triage already chose.
+
+        The model does not carry a 36-character id between two tool calls. On
+        Keystone it corrupted the same one twice in a day:
+
+            triage chose  3a612a4d-64db-4d3c-8cc5-aee43afe02f4
+            it sent       3a612a4d-64db-40a8-b997-393b4fca626f
+            and later     3a612a4d-64db-4a84-9dfc-2798e2ca1b9b
+
+        Fifteen characters right, then invented. write_reply refuses, the model
+        abandons the ticket, and a customer gets nothing.
+
+        write_reply already falls back to re-deriving an article from the
+        ticket's words, but re-deriving is not the same as using the decision
+        that was already made: on TKT-2026-00099 it reached a different article
+        and the topic guard correctly rejected it, so the ticket failed anyway.
+        The queue walk recorded its choice per ticket. Use that.
+
+        The loop does this rather than the prompt asking the model to be
+        careful, for the usual reason: anything the model must remember to do,
+        it will not do.
+        """
+        if tool != "write_reply" or not args.get("ticket"):
+            return args
+        rows = (self.results.get("triage_queue") or {}).get("tickets") or []
+        row = next((r for r in rows if r.get("ticket") == args["ticket"]), None)
+        if not row:
+            return args
+        chose = (row.get("article") or {}).get("id") or row.get("article_id")
+        if not chose or chose == args.get("article_id"):
+            return args
+        self.trace({"event": "article_id_corrected", "ticket": args["ticket"],
+                    "model_sent": args.get("article_id"), "triage_chose": chose})
+        fixed = dict(args)
+        fixed["article_id"] = chose
+        return fixed
 
     def _record_undrafted(self, finding):
         """Say plainly when tickets the triage marked answerable were not answered.

@@ -40,6 +40,11 @@ REPEAT_LIMIT = 2
 # finishes rather than looping forever.
 TURNED_BACK_LIMIT = int(os.environ.get("SEAT15_TURNED_BACK_LIMIT") or 8)
 
+# How many times to re-ask when the reply contains no JSON. Two, because the
+# observed provider errors cleared on the next call, and a model replying in
+# prose on purpose should not cost more than a couple of calls to establish.
+UNUSABLE_RETRIES = int(os.environ.get("SEAT15_UNUSABLE_RETRIES") or 2)
+
 # How long one model call may spend being retried before the task is abandoned.
 # The whole run has a budget; one unlucky task must not spend it.
 RETRY_SECONDS = float(os.environ.get("SEAT15_RETRY_SECONDS") or 75)
@@ -1151,12 +1156,33 @@ class LLMPolicy(object):
         if steps_left <= 1:
             msgs.append({"role": "user", "content":
                          "You are out of steps. Finish now with a done object."})
-        text = self._chat(msgs)
-        action = _first_json(text)
-        if not action:
+        # A reply with no JSON in it is not a decision, so do not spend a step
+        # on it. Ask again.
+        #
+        # 2026-10-19: the provider began returning HTTP 200 whose entire
+        # content was "An error occurred during processing." Our client sees a
+        # well-formed reply, the parser finds no action, and the loop charges
+        # the model a step for a sentence it never chose to send. d01 failed
+        # that way on a run where the same code passed an hour earlier - three
+        # unusable replies, three steps gone, and it escalated with a sendable
+        # article sitting in front of it. s02 spent six minutes and 83 trace
+        # lines on the same thing.
+        #
+        # This is the day's recurring bug in its third costume: a failed
+        # request read as an answer. A model that genuinely replies in prose
+        # costs two extra calls and then lands where it would have anyway.
+        text = ""
+        for attempt in range(UNUSABLE_RETRIES + 1):
+            text = self._chat(msgs)
+            action = _first_json(text)
+            if action:
+                return action
             self.unusable += 1
-            return {"tool": None, "args": {}, "_unparsed": text[:300]}
-        return action
+            if attempt < UNUSABLE_RETRIES:
+                self.trace({"event": "reply_unusable_retrying",
+                            "attempt": attempt + 1, "reply": text[:160]})
+                time.sleep(1.0 + attempt)
+        return {"tool": None, "args": {}, "_unparsed": text[:300]}
 
     def _chat(self, msgs):
         payload = {"model": self.model, "messages": msgs, "temperature": 0}

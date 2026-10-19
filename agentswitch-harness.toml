@@ -10,16 +10,9 @@
 install = "pip install -r requirements.txt"
 run = "python -m seat15.harness.official"
 results = "results.json"
-# KEYSTONE ONLY for this run, deliberately. Suryodaya scored 15 of 16 on 16
-# October and its one failure (i04) is a judgement call we have decided not to
-# patch, so another run there would re-learn what we know. Every open question
-# is on Keystone: whether the finish-guard fix works (h01), whether the retry
-# ceiling frees enough budget to reach s02, and d03.
-#
-# Listing one instance does not halve the work - when only suryodaya was listed
-# the platform ran both servers and both executed the Suryodaya set. So this
-# should give two runs of the Keystone tasks, which is worth having: a single
-# run of a model is a sample, and four tasks have flipped between runs this
-# month.
-instances = ["keystone"]
+# BOTH again, from 2026-10-19. i04 is fixed and it is a Suryodaya task, so
+# leaving Suryodaya out would mean the fix most worth confirming never runs -
+# and it was verified only against a simulation of the platform model's move,
+# not against the model itself.
+instances = ["suryodaya", "keystone"]
 timeout_minutes = 30

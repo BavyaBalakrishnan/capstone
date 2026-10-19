@@ -62,12 +62,23 @@ def _likely_seconds(task, done, started):
     if not done:
         return 240.0
     elapsed = time.time() - started
-    units = sum(max(1, _expensive(t)) for t in _DONE_TASKS) or len(done)
-    per_unit = elapsed / float(units)
-    return per_unit * max(1, _expensive(task)) * 1.25      # 25% headroom
+    # The unit is ONE MODEL CALL, so a task that makes ten must count as ten.
+    # Counting every unmarked task as a single unit made the pace look ten
+    # times slower than it is: on the Suryodaya dry run of 2026-10-19 that
+    # reserved fourteen minutes for q01 and skipped it with nine minutes still
+    # on the clock. Unmarked tasks average about four calls, measured.
+    units = sum(_expensive(t) or TYPICAL_CALLS for t in _DONE_TASKS)
+    if not units:
+        return 240.0
+    per_call = elapsed / float(units)
+    return per_call * (_expensive(task) or TYPICAL_CALLS) * 1.4   # 40% headroom
 
 
 _DONE_TASKS = []
+
+# Model calls a task makes when its file does not say. Median across our run
+# history is 3-6; four is the middle of that.
+TYPICAL_CALLS = 4
 
 
 def _expensive(task):

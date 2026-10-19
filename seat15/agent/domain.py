@@ -896,9 +896,20 @@ def record_finding(client, run_id, finding):
             sc, err = client.call("AgentMemory.create", args)
         except Exception as e:
             last, sc, err = repr(e), None, repr(e)
-        if not err:
-            return {"recorded": True, "agent_memory_id": (sc or {}).get("id"),
+        # An id is the only proof the row exists. A create that returns neither
+        # an error nor an id has silently done nothing, and until 2026-10-19
+        # this reported `recorded: true, agent_memory_id: null` - so the run
+        # believed it had filed its conclusion, the verifier found no row, and
+        # the task scored zero with no trace of why. Found on the Suryodaya run
+        # of that afternoon: s01 and q01 both returned exactly that, and
+        # neither row was among all 680 in the table.
+        new_id = (sc or {}).get("id") if not err else None
+        if not err and new_id:
+            return {"recorded": True, "agent_memory_id": new_id,
                     "run_id": run_id, "attempts": attempt + 1}
+        if not err:
+            err = ("AgentMemory.create returned no error and no id, so nothing "
+                   "was stored")
         last = err
         if attempt < 2:
             time.sleep(2 * (attempt + 1))

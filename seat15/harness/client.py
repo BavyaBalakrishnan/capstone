@@ -67,6 +67,21 @@ ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), ".env")
 
 
+# The largest page the platform will serve. limit=1000 answers, limit=2000 is
+# HTTP 422, so 500 leaves room and costs one extra request per 500 rows.
+PAGE = 500
+
+# One token per instance, shared by every Client in the process.
+#
+# `client_for` builds a fresh write-capable Client for every task, and the grid
+# runs two arms, so a 17-task run logged in more than thirty times inside a
+# minute. On 2026-10-19 that came back `HTTP 401` from the login endpoint
+# itself and every remaining task errored. Logging in once per instance is both
+# kinder to the platform and the only way a renewal can be shared: a Client
+# that renews a token no other Client can see renews it for itself alone.
+_TOKENS = {}
+
+
 class Refused(Exception):
     """A call the harness will not make. Not an error from the server."""
 
@@ -116,6 +131,7 @@ class Client(object):
         self.server_date = None  # server clock, captured at login
         # Rates, not flags. S18Code's base.py: "one bad reply in twelve is not
         # the same defect as twelve out of twelve."
+        self._relogged = False
         self.transport_retries = 0
         self.transport_failures = 0
 
@@ -142,6 +158,10 @@ class Client(object):
         if supplied:
             self._token = supplied
             return self._token
+        cached = _TOKENS.get(self.instance)
+        if cached:
+            self._token = cached
+            return self._token
         pw = self.cred("AS_PASSWORD_" + self.instance.upper())
         email = self.cred("AS_EMAIL")
         missing = [n for n, v in (("AS_EMAIL", email),
@@ -161,6 +181,7 @@ class Client(object):
         self._token = json.loads(body).get("token")
         if not self._token:
             raise Refused("login on %s returned no token" % self.instance)
+        _TOKENS[self.instance] = self._token
         # Server clock, not ours. Clock skew must not hide a write.
         self.server_date = headers.get("Date")
         return self._token
@@ -180,13 +201,52 @@ class Client(object):
             return status, {"_raw": body[:2000]}
 
     def list(self, entity, limit=500, **filters):
-        """All rows of an entity over REST. Returns [] on denial rather than raising,
-        because 'this seat may not read it' is a legitimate answer a verifier acts on."""
-        q = "&".join(["limit=%d" % limit] + ["%s=%s" % kv for kv in filters.items()])
-        status, data = self.rest_get("/api/%s?%s" % (entity, q))
-        if status != 200:
-            return []
-        return data.get("data", [])
+        """All rows of an entity over REST.
+
+        403 returns [], because "this seat may not read it" is a legitimate
+        answer several verifiers act on. Every OTHER failure raises, and that
+        distinction is the whole point of this function.
+
+        Until 2026-10-19 any non-200 returned []. A verifier cannot tell an
+        empty list from a failed request, so it read one as the other and
+        reported "premise gone: no KB articles readable" - which means "the
+        defect we test has been fixed on the platform", so the task left the
+        denominator and nobody counted it against us. On the Suryodaya run that
+        afternoon six tasks excused themselves that way while the same entity
+        answered HTTP 200 with 102 rows from a second process.
+
+        That is the most expensive shape of bug this harness can have: our own
+        flakiness wearing the costume of a clean result. An unreachable platform
+        must say so by name, so the runner can file it as "not judged - this is
+        our run failing", a category that already exists and is honest.
+
+        It also pages. One request returned at most `limit` rows and the caller
+        could not tell a complete answer from a truncated one. AgentMemory
+        passed 500 rows on 2026-10-19 - it is append-only from this seat and
+        every run adds to it - so `list("AgentMemory", limit=500)` returned
+        exactly 500 of 680 and `ctx.finding()` could not find a row that was
+        there. The response carries `total`, so there is no excuse for guessing.
+        """
+        extra = ["%s=%s" % kv for kv in filters.items()]
+        rows = []
+        offset = 0
+        while True:
+            q = "&".join(["limit=%d" % min(limit, PAGE), "offset=%d" % offset] + extra)
+            status, data = self.rest_get("/api/%s?%s" % (entity, q))
+            if status == 403:
+                return []
+            if status != 200:
+                raise Transport(
+                    "GET /api/%s returned HTTP %s, so this verifier cannot see "
+                    "the rows it grades. Not a denial and not an empty book."
+                    % (entity, status))
+            page = data.get("data") or []
+            rows.extend(page)
+            total = data.get("total")
+            offset += len(page)
+            if not page or total is None or offset >= int(total) or offset >= limit:
+                break
+        return rows
 
     def is_denied(self, path):
         """Premise check. True when this seat is refused, which several tasks depend on."""
@@ -285,9 +345,32 @@ class Client(object):
                     return resp.status, resp.read().decode("utf-8", "replace"), dict(resp.headers)
             except urllib.error.HTTPError as e:
                 body = e.read().decode("utf-8", "replace")
-                if e.code < 500:
+                # 401 and 429 are 4xx but they are not answers.
+                #
+                # 429 says "ask again later"; returning it as an answer turns a
+                # queue into a wrong result. 401 says the token died mid-run,
+                # and login() caches forever - once the first 401 lands, every
+                # later request gets one too, which is why this failure is
+                # monotonic rather than flaky. A supplied AGENTSWITCH_TOKEN
+                # cannot be renewed (there is no password to exchange), so that
+                # case must say so by name instead of looking like an empty book.
+                if e.code == 401 and auth and not self._relogged:
+                    self._relogged = True
+                    if os.environ.get("AGENTSWITCH_TOKEN"):
+                        raise Transport(
+                            "the token supplied in AGENTSWITCH_TOKEN was rejected "
+                            "(HTTP 401) partway through the run; it cannot be "
+                            "renewed from inside the harness")
+                    self._token = None
+                    _TOKENS.pop(self.instance, None)
+                    self.login()
+                    last = "HTTP 401 (token renewed, retrying)"
+                elif e.code == 429:
+                    last = "HTTP 429"
+                elif e.code < 500:
                     return e.code, body, dict(e.headers or {})
-                last = "HTTP %s" % e.code
+                else:
+                    last = "HTTP %s" % e.code
             except (urllib.error.URLError, socket.timeout, OSError) as e:
                 last = repr(e)
             self.transport_retries += 1

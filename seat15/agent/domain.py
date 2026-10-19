@@ -867,6 +867,26 @@ def digest_status(client, name):
 
 # --------------------------------------------------------------------------- findings
 
+def _finding_is_there(client, run_id):
+    """Is a row for this run_id actually in AgentMemory?
+
+    Used only to settle an ambiguous create. Any failure to read answers
+    "unknown", which is treated as not-there so the caller retries - a
+    needless retry costs one request, a false "recorded" costs the task.
+    """
+    try:
+        # 500 would be the same truncation this file just stopped tolerating:
+        # the table was 681 rows on 2026-10-19 and only grows. A row missed
+        # because it sat past the page would read as "not stored".
+        for row in client.rows("AgentMemory", limit=1000):
+            content = str(row.get("content") or "")
+            if run_id in content and FINDING_PREFIX in content:
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def record_finding(client, run_id, finding):
     """Persist the conclusion as a row. This is the contract with the harness: the
     verifier reads this, never the agent's reply text.
@@ -908,8 +928,19 @@ def record_finding(client, run_id, finding):
             return {"recorded": True, "agent_memory_id": new_id,
                     "run_id": run_id, "attempts": attempt + 1}
         if not err:
-            err = ("AgentMemory.create returned no error and no id, so nothing "
-                   "was stored")
+            # 200, no error, no id. The row may or may not be there, and
+            # guessing either way has already cost us a run each: trusting it
+            # reported `recorded: true, agent_memory_id: null` for rows that
+            # did not exist, and distrusting it failed eight tasks on
+            # 2026-10-19 whose rows we never checked. So check. The platform
+            # offers the handle itself - a successful create returns
+            # `_verify_with: [{tool: AgentMemory.get, arguments: {id}}]`.
+            if _finding_is_there(client, run_id):
+                return {"recorded": True, "agent_memory_id": None,
+                        "run_id": run_id, "attempts": attempt + 1,
+                        "confirmed_by": "read-back"}
+            err = ("AgentMemory.create returned no error and no id, and no row "
+                   "for this run_id is readable afterwards")
         last = err
         if attempt < 2:
             time.sleep(2 * (attempt + 1))

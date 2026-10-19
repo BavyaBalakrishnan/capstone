@@ -122,7 +122,33 @@ class Client(object):
         # chooses, with a token instead of a password, so neither the host map
         # nor .env can be assumed. Locally nothing is set and the map is used,
         # which keeps every existing command working unchanged.
-        self.base = (os.environ.get("AGENTSWITCH_BASE_URL") or HOSTS[instance]).rstrip("/")
+        override = (os.environ.get("AGENTSWITCH_BASE_URL") or "").rstrip("/")
+        self.base = (override or HOSTS[instance]).rstrip("/")
+        # An override that is the OTHER instance's host is never right.
+        #
+        # 2026-10-19: every dry run that day was launched with
+        # AGENTSWITCH_BASE_URL set to the class host, which is Keystone's. The
+        # Suryodaya runs therefore worked Keystone's instance holding a
+        # Suryodaya token: reads returned Keystone's rows, so a run labelled
+        # suryodaya reported 150 tickets for a 103-ticket book, writes to
+        # AgentMemory came back 200 with no id and stored nothing, and
+        # i01_sla_not_computable_suryodaya was graded against the wrong
+        # instance entirely. Nothing in the output said which instance had
+        # actually been read, so the numbers looked like agent failures for
+        # most of a day.
+        #
+        # An unrecognised host is still allowed, because the graded run hands
+        # us a fresh copy of the instance at a URL it chooses. Only a host we
+        # can positively identify as a DIFFERENT instance is refused.
+        if override:
+            wrong = [name for name, host in HOSTS.items()
+                     if name != instance and host.rstrip("/") == override]
+            if wrong:
+                raise Refused(
+                    "AGENTSWITCH_BASE_URL is %s, which is %s's host, but "
+                    "AGENTSWITCH_INSTANCE is %s. A run that reads one instance "
+                    "and reports another is worse than no run."
+                    % (override, wrong[0], instance))
         self.allow_writes = allow_writes
         self._env = load_env(env_path)
         self._token = None

@@ -138,6 +138,7 @@ class VerifyContext(object):
         self.instance = instance
         self._result = None
         self._finding = None
+        self.finding_from_disk = False
 
     # -- evidence, re-read from disk ---------------------------------------
 
@@ -176,6 +177,32 @@ class VerifyContext(object):
             if data and data.get("run_id") == self.run_id:
                 self._finding = data
                 return data
+
+        # The row is not there. If the agent recorded that the WRITE was
+        # refused, fall back to the copy it kept on disk.
+        #
+        # Keystone graded run, 2026-10-16: four tasks scored zero for "no
+        # finding recorded in AgentMemory". The work was done and the
+        # conclusion reached; one refused write threw all of it away. The cause
+        # is still unknown - not size (AgentMemory takes 40,000 characters and a
+        # finding is 5,000), not a write rate limit (18 rapid writes all
+        # succeeded), not the payload shape (a real queue-walk finding writes
+        # first time). It is not reproducible against the live instance, and the
+        # graded run uses a throwaway copy we cannot reach.
+        #
+        # This does NOT weaken what a verifier trusts. Every FACT it checks -
+        # ticket counts, article status, SLA deadlines - still comes from the
+        # database, re-read at scoring time. Only the agent's own CLAIM comes
+        # from disk, and only when the run itself recorded that the platform
+        # refused to store it. The fallback is flagged in the verdict so a
+        # reader can see it was used.
+        why = (self.result.get("degraded_reason") or "")
+        if "AgentMemory" in why:
+            disk = self.result.get("finding")
+            if disk:
+                self.finding_from_disk = True
+                self._finding = disk
+                return disk
         self._finding = {}
         return None
 

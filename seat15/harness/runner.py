@@ -216,6 +216,13 @@ def judge(run_dir, clients):
         except Exception as e:  # a verifier that raises cannot judge
             verdict, reason = UNEVALUATED, "verifier raised: %r" % e
     scored = axes.score(ctx.result, verdict)
+    if getattr(ctx, "finding_from_disk", False):
+        # Say so in the verdict. A claim read from disk because the platform
+        # refused to store it is still a judged result, but a reader should
+        # know which it was.
+        scored["finding_from_disk"] = True
+        reason = ("%s  [finding read from the run's own record: the platform "
+                  "refused the AgentMemory write]" % reason)
     # A verifier that could not reach the platform is a degraded run as surely as
     # an agent that could not. Found 2026-10-03: a verifier Transport failure was
     # correctly returned as `unevaluated`, but the health column still read "ok",

@@ -10,9 +10,19 @@
 install = "pip install -r requirements.txt"
 run = "python -m seat15.harness.official"
 results = "results.json"
-# BOTH again, from 2026-10-19. i04 is fixed and it is a Suryodaya task, so
-# leaving Suryodaya out would mean the fix most worth confirming never runs -
-# and it was verified only against a simulation of the platform model's move,
-# not against the model itself.
-instances = ["suryodaya", "keystone"]
+# ONE instance per graded run, from 2026-10-19 evening, Suryodaya first.
+#
+# This list decides what runs; the button pressed in the UI does not. Listing
+# only Suryodaya once before meant the run labelled Keystone graded the
+# Suryodaya set, so d03 and h01 were never graded at all. So: change this line
+# between submissions, and never assume the label picked the instance.
+#
+# Separately rather than together because the two shared a 26-minute budget and
+# Keystone used 24 of it. Alone, each gets the whole budget, and time is what
+# we have lost tasks to.
+#
+# Suryodaya is 16 of 16 locally on this commit. Keystone is NOT yet measured on
+# it - a crash of ours took out its three queue tasks - so do not switch this
+# to keystone until that run is clean.
+instances = ["suryodaya"]
 timeout_minutes = 30

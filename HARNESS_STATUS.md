@@ -482,17 +482,46 @@ one task flip between runs under the same model name. Both results are recorded.
 
 ## 9. What is pending
 
-### A0. Where we stopped on 19 October, and what to do first
+### A0. Where both instances stand
 
-**Suryodaya is submitted. Keystone is not, and finishing it is the only task
-blocking us.**
+**Both are measured. Suryodaya is submitted and graded; Keystone is ready to
+submit.**
 
-Suryodaya is **16 of 16** locally on commit `2476665`, which is what `main`
-holds and what was submitted. Every failure found that day - `d01`, `i05`,
-`q01` - passes on it.
+| instance | local | graded | only failure |
+|---|---|---|---|
+| Suryodaya | 16 of 16 | **16 of 16** | none |
+| Keystone | 14 of 15 | not yet submitted | `d03` |
 
-Keystone has **not** been measured on that commit. Two different things stopped
-it, in order:
+The graded Suryodaya run matched ours task for task, on the platform's own
+model rather than the one we pinned - so the fixes hold on a model we did not
+choose. It confirmed three of them by name: `i05` ("avoided or flagged 2
+badly-rated public articles"), `i04` ("declined to send: 15 articles on
+'shortage', none published+public"), and `d01`/`d02` ("answered ... despite the
+question sharing none of its words").
+
+One number in the graded output deserves reading rather than celebrating:
+`q01` reported **0 drafted and 21 escalated** on Suryodaya. No customer got an
+answer. That is the correct answer there - `draftable` is 0 both locally and
+graded, because Suryodaya has 10 sendable articles out of 100 and none is
+on-topic for that queue - and the task checks that the accounting is honest,
+not that drafts exist. On Keystone the same task drafts 5 of 5.
+
+**How Keystone's 14 of 15 was measured, stated precisely:** the budgeted run
+reached 13 of 15 tasks in 23 minutes and reported the last two as *not
+reached*, because the provider was answering at ~8.5s per call instead of
+~1.9s. `q01` and `s02` were then run on their own through the same
+`run_one`/`judge` path and both approved. Every Keystone task is measured; not
+all of them fit one 26-minute budget at that speed. If the endpoint is slow at
+grading time, expect the last task or two to come back "not reached" - the
+pacing logic protecting the budget, not a failure.
+
+### A0b. The history that got here, kept because the failures were the lesson
+
+Suryodaya was **16 of 16** locally on commit `2476665`, which is what was
+submitted. Every failure found that day - `d01`, `i05`, `q01` - passes on it.
+
+Keystone took two more days to measure, and three different things stopped it
+in turn:
 
 1. A crash of ours, since fixed, killed `h01`, `q01` and `r02` mid-run.
 2. The model provider's quota was exhausted on every key we have. `t01` came
@@ -500,11 +529,15 @@ it, in order:
    fresh key returned 429 on the first call - so the limit is per project, not
    per key.
 
-Of the Keystone run that did get through, 10 tasks were measured: 8 approve,
-`d03` revise, `i02` legitimately unevaluated. The six unmeasured ones include
-`h01` and `q01`, which are the two that decide whether Keystone is submittable.
+3. The provider slowed from ~1.9s to ~8.5s per call, so the 21 October run
+   reached 13 of 15 tasks and reported `q01` and `s02` as *not reached*.
 
-**To finish it, when quota allows:**
+All three are now resolved and every Keystone task has a verdict. `h01`
+approves (the UUID fix, on the instance where it failed), `r02` approves (the
+crash fix), and `q01` approves with **5 drafts of 5 draftable** where it
+previously filed 2.
+
+**To re-measure either instance:**
 
 ```
 tools/dryrun.sh keystone
@@ -516,14 +549,12 @@ and runs a copy of the tree. Read its header before changing it - every line in
 there is paid for. Run one instance at a time; two compete for the same model
 key.
 
-Then, only if it comes back clean apart from `d03`, change **one line** in
-`agentswitch-harness.toml`:
+Before each submission, set **one line** in `agentswitch-harness.toml` to the
+instance you mean, and push:
 
 ```toml
 instances = ["keystone"]
-```
-
-and push before submitting. That line decides what runs - the button in the UI
+``` That line decides what runs - the button in the UI
 does not. Listing the wrong instance there is how `d03` and `h01` went ungraded
 once already.
 

@@ -21,8 +21,18 @@ results = "results.json"
 # Keystone used 24 of it. Alone, each gets the whole budget, and time is what
 # we have lost tasks to.
 #
-# Suryodaya is 16 of 16 locally on this commit. Keystone is NOT yet measured on
-# it - a crash of ours took out its three queue tasks - so do not switch this
-# to keystone until that run is clean.
-instances = ["suryodaya"]
+# Suryodaya was submitted from this file at 16 of 16 local / 16 of 16 graded.
+# Keystone is now 14 of 15 local on this commit - d03 the only failure, and it
+# is deliberately unresolved (see its task file). Switched to keystone for the
+# second submission.
+#
+# Note on how Keystone was measured: the budgeted run reached 13 of its 15
+# tasks in 23 minutes and reported the last two as "not reached", because the
+# provider was answering at ~8.5s per call rather than ~1.9s. q01 and s02 were
+# then run on their own through the same run_one/judge path and both approved.
+# So every Keystone task is measured, but not all of them inside one 26-minute
+# budget at that speed. If the endpoint is slow at grading time, expect the
+# last task or two to come back "not reached" - that is the pacing logic
+# protecting the budget, not a failure.
+instances = ["keystone"]
 timeout_minutes = 30

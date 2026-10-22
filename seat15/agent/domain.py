@@ -748,6 +748,46 @@ def rating_band(helpful, unhelpful):
     return "unproven"
 
 
+# Words a request repeats that no offered article mentions at all. These are
+# the ones that decide whether an article answers the question: on d03 they are
+# short, count, piec, shipment, arrived and packed, while the two top-ranked
+# articles match only `step` and `frame`.
+def _uncovered(usable, weights):
+    if not usable:
+        return sorted(weights)
+    covered = set()
+    for x in usable:
+        covered.update(x.get("matched") or [])
+    return sorted(w for w in weights if w not in covered)
+
+
+def _nothing_covers(usable, weights):
+    """True when every offered article matches the request only incidentally.
+
+    "Incidentally" is made precise rather than judged: an article counts as
+    addressing the request only if it matches a word the request uses that is
+    NOT matched by every single candidate. When all candidates match exactly
+    the same one or two words - the product's name - none of them is about the
+    problem, and the honest answer is that this article has not been written.
+
+    This reports; it does not filter. d01 and d02 reach their right answers
+    through the whole-book fallback and the model's judgement, not through this
+    ranking, so a true value here cannot cost them an answer.
+    """
+    if not usable:
+        return True
+    if len(weights) <= 2:
+        return False          # too short a request to tell product from problem
+    shared = None
+    for x in usable:
+        hits = set(x.get("matched") or [])
+        shared = hits if shared is None else (shared & hits)
+    distinct = [w for x in usable for w in (x.get("matched") or [])
+                if w not in (shared or set())]
+    # Every candidate matched the same words and nothing else: a name match.
+    return not distinct and len(shared or ()) < max(2, len(weights) // 4)
+
+
 def kb_candidates(client, query):
     """Articles matching `query`, each labelled with whether it may be SENT.
 
@@ -773,6 +813,26 @@ def kb_candidates(client, query):
                     "status": a.get("status"), "visibility": a.get("visibility"),
                     "sendable": sendable, "helpful": helpful, "not_helpful": unhelpful,
                     "band": band, "badly_rated": band == "blocked", "matched": hits,
+                    # What the request asked about that this article does NOT
+                    # mention. The counterpart of `matched`, and the more useful
+                    # half for the question "does this actually answer them?"
+                    #
+                    # d03, 2026-10-04 onward: a customer reports a shipment 48
+                    # pieces short, and the two best matches are "Cab step frame
+                    # - damaged crate claims" and "FG-CAB-3300 cab step frame -
+                    # powder coat care". Both tie on `step` and `frame` - the
+                    # product's name - and neither mentions short, count,
+                    # pieces, shipment, arrived or packed. Every quality gate we
+                    # have passes them: published, public, well rated, top of
+                    # the ranking. Only a reader notices, so tell the reader.
+                    #
+                    # Deliberately NOT a filter. Four filters were tried and
+                    # rejected with evidence (see the task file); the decisive
+                    # one is that no coverage threshold separates this wrong
+                    # answer at 14% from the RIGHT answers on d01 and d02 at
+                    # 11%. This adds information and removes no candidate, so
+                    # it cannot move d01 or d02.
+                    "missed": sorted(w for w in weights if w not in hits),
                     "score": sum(weights[w] for w in hits)})
     out.sort(key=lambda x: (-x["score"], -x["helpful"]))
     # Only the BEST matches are candidates. Found 2026-09-21 by the harness (i04):
@@ -822,6 +882,17 @@ def kb_candidates(client, query):
             # source is unproven rather than endorsed.
             "source_unproven": bool(usable) and not preferred,
             "refusal_reason": code, "reason": why, "top": out[:5],
+            # "Nothing here covers this" as a named option rather than
+            # something to be inferred from a ranking.
+            #
+            # The ranking only ever says which article matched BEST. On d03 the
+            # best match shares the product's name and nothing else, so a model
+            # reading a sorted list sees a winner where a reader would see that
+            # nobody has written this article yet. Saying so explicitly costs
+            # one field and removes nothing: when some candidate does address
+            # the request, this is false and the list reads as before.
+            "nothing_covers_request": _nothing_covers(usable, weights),
+            "uncovered_words": _uncovered(usable, weights),
             # The whole sendable set, when it is small enough to read. Added
             # 2026-10-04 after offering it as a separate tool failed: the model
             # never chose to call it, which is the preflight lesson again - a

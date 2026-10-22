@@ -33,7 +33,7 @@ import sys
 import tempfile
 import time
 
-from seat15.harness import runner
+from seat15.harness import runner, verify
 from seat15.harness.client import Client
 
 RESULTS = os.environ.get("SEAT15_RESULTS") or "results.json"
@@ -103,6 +103,12 @@ def _token_budget():
     return int(os.environ.get("SEAT15_TOKEN_BUDGET") or 420000)
 
 
+# Kept back from whatever deadline we are given, for the same reason 26 was
+# kept back from 30: the task in flight when the budget ends keeps running, and
+# on 2026-10-16 that was three minutes.
+FINALISE_SECONDS = 240.0
+
+
 def _budget():
     """How long we allow ourselves, against the cap declared in the toml.
 
@@ -114,9 +120,39 @@ def _budget():
 
     The toml declares 30 (their maximum), so 26 leaves four minutes for the
     runner to finalise results.json itself rather than be killed mid-write.
+
+    From Release 13 (2026-10-21) the platform tells us directly, via
+    AGENTSWITCH_SECONDS_LEFT and AGENTSWITCH_DEADLINE, so the 26 is a fallback
+    for local runs rather than a guess we carry into a graded one. We still
+    keep FINALISE_SECONDS back from whatever it says: being told the deadline
+    does not make it safe to work right up to it, because the task in flight
+    when the budget ends runs on - measured 2026-10-16, three minutes past.
+
+    The two are read in that order and the smaller wins, because they can
+    disagree: `seconds_left` is from when the process started and the deadline
+    is absolute, and a slow install between them makes the absolute one the
+    honest number.
     """
     mins = os.environ.get("SEAT15_BUDGET_MINUTES")
-    return float(mins) * 60 if mins else 26 * 60.0
+    if mins:
+        return float(mins) * 60
+
+    offered = []
+    left = os.environ.get("AGENTSWITCH_SECONDS_LEFT")
+    if left:
+        try:
+            offered.append(float(left))
+        except ValueError:
+            pass
+    when = os.environ.get("AGENTSWITCH_DEADLINE")
+    if when:
+        parsed = verify.parse_dt(when)
+        if parsed is not None:
+            offered.append((parsed - datetime.datetime.utcnow()).total_seconds())
+    offered = [s for s in offered if s > 0]
+    if offered:
+        return max(60.0, min(offered) - FINALISE_SECONDS)
+    return 26 * 60.0
 
 
 def _write(path, doc):

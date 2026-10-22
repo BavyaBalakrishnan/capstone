@@ -63,7 +63,21 @@ HISTORY_WINDOW = int(os.environ.get("SEAT15_HISTORY_WINDOW") or 8)
 # Phrases that make a request about MORE THAN ONE ticket. One list, used by the
 # baseline to pick its plan and by the model's prompt to decide which tools are
 # worth offering. Stated once so the two arms cannot drift apart.
-QUEUE_WORDS = "new tickets|the tickets|queue|each ticket|all tickets"
+# What counts as a request about more than one ticket.
+#
+# Extended 2026-10-22 after the graded Keystone run. h01 is a teammate's own
+# wording - "A few of the new requests ... draft the first reply for each one"
+# - and matched none of the first five phrases, so the queue walk the loop now
+# forces never fired on the one task written in somebody else's words. The
+# evaluator's note quoted the exact phrase we were missing: "for each one".
+#
+# Checked against all 21 task prompts before widening: exactly one verdict
+# changes, h01's. Nothing that asks a single question starts matching, which
+# matters - a forced queue walk on a single-question task would hand the finish
+# guard a list of draftable tickets the request never asked about.
+QUEUE_WORDS = ("new tickets|the tickets|queue|each ticket|all tickets"
+               "|for each|each one|each of (the|them)|every ticket"
+               "|new requests|the requests|these tickets|several tickets")
 
 # Tools that only make sense for a queue request. Offering them anyway is not
 # free: measured 2026-10-03, listing these two on a single-ticket task took the
@@ -269,6 +283,18 @@ def assemble_finding(results, outcome, summary="", conflict=None):
         f["reply"] = {"drafted": False, "sendable": False, "grounded_article_ids": [],
                       "refusal_reason": k.get("refusal_reason"), "reason": k.get("reason")}
         _flag(f, k.get("flag_for_review"))
+    if results.get("forced_escalations"):
+        # Tickets the loop had to escalate because no reply body could be got
+        # for them. Traced since 2026-10-22 and, until now, traced ONLY - so a
+        # ticket the loop handed to a human was invisible to the verifier and
+        # to anyone reading the finding. That is the precise state this whole
+        # mechanism exists to prevent, so it belongs in the record.
+        f["forced_escalations"] = results["forced_escalations"][:8]
+        f["forced_escalation_note"] = (
+            "%d ticket(s) were escalated by the loop, not by the model: its own "
+            "triage judged them answerable and no usable reply text could be "
+            "obtained. They are escalated, not answered, and not silently "
+            "dropped." % len(results["forced_escalations"]))
     if "triage_queue" in results:
         q = results["triage_queue"]
         _flag(f, q.get("flag_for_review"))
@@ -358,6 +384,82 @@ class Agent(object):
                 return True
         return False
 
+    def _draft_outstanding(self, unfinished, history):
+        """Write the replies the model was asked for and did not write.
+
+        The finish guard holds the model to its own triage, and for our model
+        that is enough. The graded Keystone run of 2026-10-21 showed it is not
+        enough in general: on the platform's model q01 reported 5 tickets
+        draftable and filed 0 drafts, and h01 worked 1 ticket of 8. The guard
+        pushes back at most TURNED_BACK_LIMIT times and only while the steps
+        left exceed the drafts outstanding, so a model that burns its budget
+        early is eventually allowed to finish having answered nobody.
+
+        This is the rule this harness keeps relearning: if a behaviour matters,
+        the loop does it. The model still writes every word a customer would
+        read - it is asked for one ticket's body at a time, which is a question
+        it answers reliably - but the iteration, the article and the filing are
+        ours. A ticket whose body we cannot get is escalated with a reason,
+        because the one outcome that must never happen is a ticket that is
+        neither answered nor handed to anybody.
+        """
+        for ticket, article_id in unfinished:
+            body = self._body_for(ticket)
+            if not body:
+                self.results.setdefault("forced_escalations", []).append(
+                    {"ticket": ticket, "reason": "no_reply_written"})
+                self.trace({"event": "draft_escalated_by_loop", "ticket": ticket,
+                            "why": "the model produced no usable reply body"})
+                continue
+            out = self._dispatch("write_reply", {"ticket": ticket,
+                                                 "article_id": article_id,
+                                                 "body": body})
+            self.tool_calls += 1
+            if isinstance(out, dict) and "error" in out:
+                self.tool_errors += 1
+                self.results.setdefault("forced_escalations", []).append(
+                    {"ticket": ticket, "reason": out.get("refusal_reason")
+                                                 or "write_reply_refused"})
+            else:
+                self.results.setdefault("drafts", []).append(out)
+            history.append({"tool": "write_reply",
+                            "args": {"ticket": ticket, "article_id": article_id,
+                                     "body": body},
+                            "result": out})
+            self.trace({"event": "drafted_by_loop", "step": "forced",
+                        "tool": "write_reply", "ticket": ticket,
+                        "result": _clip(out)})
+
+    def _body_for(self, ticket):
+        """One focused model call: the reply text for a single ticket.
+
+        Deliberately not the agent loop's prompt. Asking "write the body for
+        this one ticket" is a question a weak model answers; "remember to do
+        this five more times" is not.
+        """
+        t = domain.get_ticket(self.c, ticket) or {}
+        ask = (
+            "Write only the body of a reply to this customer ticket. Plain "
+            "sentences, no greeting line you cannot personalise, no subject, "
+            "no JSON, no quotes around it. Do not invent facts, prices, dates "
+            "or part numbers.%(nl)s%(nl)s"
+            "Subject: %(subject)s%(nl)sDescription: %(desc)s" % {
+                "nl": chr(10),
+                "subject": t.get("subject") or ticket,
+                "desc": (t.get("description") or "")[:1200]})
+        try:
+            text = self.policy._chat([{"role": "user", "content": ask}])
+        except Exception as e:
+            self.trace({"event": "body_call_failed", "ticket": ticket,
+                        "error": repr(e)[:160]})
+            return ""
+        text = (text or "").strip()
+        # A provider error sentence is not a reply. Same shape of check as the
+        # unusable-reply retry: ours arrive as HTTP 200 with prose in them.
+        if len(text) < 40 or "error occurred during processing" in text.lower():
+            return ""
+        return text[:4000]
+
     def _unfinished_drafts(self, history):
         """Tickets the agent itself judged draftable and has not drafted.
 
@@ -419,6 +521,33 @@ class Agent(object):
         self.trace({"event": "preflight", "result": pre})
         if pre.get("halt"):
             return self._finish("halted", "preflight: %s" % pre.get("reason"), "halted")
+
+        # A request about a queue gets its queue walked, from code, before the
+        # model is asked anything.
+        #
+        # The graded Keystone run of 2026-10-21: h01 "worked 1 ticket(s); the
+        # request says 'for each one'". The model handled one ticket and
+        # finished. The finish guard could not hold it to the rest, because the
+        # guard works from triage_queue's output and the model never called
+        # triage_queue - so there was no list of tickets to be held to.
+        #
+        # Same reasoning as preflight directly above: whether a queue request
+        # gets a queue walk should not depend on a model choosing to do it. The
+        # model still decides what to do with each ticket; it no longer decides
+        # whether to look. Gated so the grid can move exactly this one thing.
+        if queue_request(prompt) and not os.environ.get("SEAT15_NO_FORCED_TRIAGE"):
+            try:
+                q = self._dispatch("triage_queue", {})
+                if isinstance(q, dict) and "error" not in q:
+                    self.results["triage_queue"] = q
+                    self.tool_calls += 1
+                    self.trace({"event": "triage_queue_from_code",
+                                "in_queue": q.get("in_queue"),
+                                "worked": q.get("worked"),
+                                "draftable": q.get("draftable")})
+            except Exception as e:
+                # Not fatal: the model can still call it itself.
+                self.trace({"event": "forced_triage_failed", "error": repr(e)[:160]})
 
         history = []
         # A "done" we send back is not work, and must not be charged to the
@@ -503,6 +632,16 @@ class Agent(object):
                                     "result": {"error": LOOK_FIRST_GUARD}})
                     continue
                 unfinished = self._unfinished_drafts(history)
+                if unfinished and (turned_back >= TURNED_BACK_LIMIT
+                                   or left <= len(unfinished)):
+                    # The guard is spent, or there is no longer room to ask
+                    # again. Do the work rather than let the run end with
+                    # tickets its own triage called answerable unanswered.
+                    self.trace({"event": "finishing_drafts_in_code",
+                                "outstanding": [t for t, _ in unfinished],
+                                "turned_back": turned_back, "steps_left": left})
+                    self._draft_outstanding(unfinished, history)
+                    unfinished = self._unfinished_drafts(history)
                 if unfinished and left > len(unfinished):
                     # Measured 2026-10-03: the model capped the queue at 5, found
                     # 4 tickets with a sendable article, wrote ONE reply, and

@@ -29,6 +29,7 @@ would make the number worthless.
 import datetime
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -107,6 +108,28 @@ def _token_budget():
 # kept back from 30: the task in flight when the budget ends keeps running, and
 # on 2026-10-16 that was three minutes.
 FINALISE_SECONDS = 240.0
+
+
+# A provider fault we should ask again about, rather than record as a verdict.
+TRANSIENT = re.compile(r"HTTP 429|HTTP 5\d\d|rate.?limit|timed out|timeout"
+                       r"|unavailable|ConnectionReset|forcibly closed", re.I)
+TRANSIENT_RETRIES = 1
+TRANSIENT_PAUSE = 20.0
+
+
+def _worth_retrying(verdict, reason):
+    """Only an unevaluated run, and only when OUR side was what failed.
+
+    "premise gone" is not retried: the platform really has changed and asking
+    again will say the same thing. A revise is never retried - the agent
+    answered and the answer was wrong, which is the measurement working.
+    """
+    if verdict != "unevaluated":
+        return False
+    text = str(reason or "")
+    if "premise gone" in text:
+        return False
+    return bool(TRANSIENT.search(text))
 
 
 def _budget():
@@ -247,19 +270,42 @@ def main(argv=None):
 
         verdict, reason = base_verdict, "fixed-script arm only; no model available"
         if model:
-            try:
-                d, _ = runner.run_one(task, inst, runner.AGENTS["llm"],
-                                      stamp + "-llm", clients, model=model)
-                row = runner.judge(d, clients)
-                verdict, reason = row["verdict"], row.get("reason")
+            # Retried when the PROVIDER failed, not when the agent did.
+            #
+            # A 429 from the model endpoint is a burst limit, not a verdict: on
+            # 2026-10-22 r02 was lost to one and three probes a minute later all
+            # answered. Every such task leaves the denominator, so a momentary
+            # rate limit quietly shrinks what we measured - and we have now lost
+            # tasks this way on four separate days.
+            #
+            # Only transient provider faults are retried, only while the budget
+            # can still cover the work, and at most TRANSIENT_RETRIES times. An
+            # agent that got the answer wrong is not retried: that is a result.
+            for attempt in range(1, TRANSIENT_RETRIES + 2):
                 try:
-                    res = json.load(open(os.path.join(d, "result.json"),
-                                         encoding="utf-8"))
-                    spent[0] += (res.get("health") or {}).get("tokens") or 0
-                except Exception:
-                    pass
-            except Exception as e:
-                verdict, reason = "error", "run failed: %r" % e
+                    d, _ = runner.run_one(task, inst, runner.AGENTS["llm"],
+                                          stamp + "-llm", clients, model=model,
+                                          attempt=attempt)
+                    row = runner.judge(d, clients)
+                    verdict, reason = row["verdict"], row.get("reason")
+                    try:
+                        res = json.load(open(os.path.join(d, "result.json"),
+                                             encoding="utf-8"))
+                        spent[0] += (res.get("health") or {}).get("tokens") or 0
+                    except Exception:
+                        pass
+                except Exception as e:
+                    verdict, reason = "error", "run failed: %r" % e
+                if not _worth_retrying(verdict, reason):
+                    break
+                if attempt > TRANSIENT_RETRIES:
+                    break
+                if time.time() > deadline - max(RESERVE_SECONDS,
+                                                _likely_seconds(task, rows, started)):
+                    reason = "%s; no budget left to retry" % reason
+                    break
+                print("  %-44s %s" % (task["id"], "retrying: %s" % reason))
+                time.sleep(TRANSIENT_PAUSE)
 
         if verdict == "unevaluated":
             # WHY it could not be judged decides whether it is excusable. A

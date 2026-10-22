@@ -669,6 +669,15 @@ class Agent(object):
                                     action.get("summary", ""), "done")
 
             tool, args = action.get("tool"), action.get("args") or {}
+            refusal = self._only_draftable(tool, args)
+            if refusal:
+                self.tool_errors += 1
+                self.policy_errors += 1
+                history.append({"tool": tool, "args": args,
+                                "result": {"error": refusal}})
+                self.trace({"event": "draft_refused_not_draftable",
+                            "ticket": args.get("ticket"), "why": refusal})
+                continue
             args = self._correct_article_id(tool, args)
             key = (tool, json.dumps(args, sort_keys=True))
             self.calls_by_key[key] = self.calls_by_key.get(key, 0) + 1
@@ -747,6 +756,43 @@ class Agent(object):
             "the knowledge base answers this request, and none of those "
             "articles may be sent; substituting a publishable article about "
             "something else is not an answer")
+
+    def _only_draftable(self, tool, args):
+        """Refuse a reply for a ticket the agent's own triage did not mark draftable.
+
+        Keystone, 2026-10-22: q01 "says 5 tickets were draftable, filed 7
+        drafts". The queue walk marked 5 tickets draftable and 3 escalate, and
+        the model wrote replies for seven tickets - two of them, TKT-2026-00103
+        and TKT-2026-00105, not in the draftable set at all.
+
+        A ticket is marked escalate precisely because no sendable article
+        covers it, so a reply for one is ungrounded by construction: the
+        customer gets an answer assembled from nothing the triage would stand
+        behind. The accounting failure the verifier reports is the symptom; the
+        ungrounded reply is the actual harm.
+
+        Only enforced when a queue walk exists AND names the ticket. A
+        single-ticket request never walks a queue, and d01, d02 and d03 all
+        reach write_reply with no triage at all - those are untouched.
+        """
+        if tool != "write_reply":
+            return ""
+        ticket = args.get("ticket")
+        rows = (self.results.get("triage_queue") or {}).get("tickets") or []
+        if not rows or not ticket:
+            return ""
+        row = next((r for r in rows if r.get("ticket") == ticket), None)
+        if row is None:
+            return ("%s is not in the queue your triage walked. Work the "
+                    "tickets it listed, or walk the queue again if you believe "
+                    "it is stale." % ticket)
+        if row.get("decision") != "draft":
+            return ("your own triage marked %s %r (%s), not draftable. A reply "
+                    "for it would be grounded in nothing. File a to-do for it "
+                    "instead, or re-triage if you think that was wrong."
+                    % (ticket, row.get("decision"),
+                       row.get("refusal_reason") or "no usable article"))
+        return ""
 
     def _correct_article_id(self, tool, args):
         """Replace a mistyped article id with the one triage already chose.

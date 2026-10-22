@@ -646,10 +646,32 @@ unresolved; see its task file before touching it.
    `OPENAI_MODEL`, so the platform picks the model there. If it hands us a dead
    build, tasks return `unevaluated: not judged`, which is the harness being
    honest rather than the agent failing.
-3. **A correction pass on `GAP_REPORT.md`.** Roughly eight figures in it are now
+3. **Semantic retrieval for the knowledge base — measured, written up, NOT
+   shipped.** `tools/semantic_probe.py` is read-only and prints the evidence:
+   embedding the articles ranks d01's and d02's *right* article first, which
+   lexical overlap misses entirely, and the signal that separates "an article
+   answers this" from "none does" is the **margin** between the top two scores,
+   not the score. d01 +0.117, d02 +0.106, d03 **+0.009**.
+
+   This is why five attempts at d03 failed: they all thresholded a signal that
+   is wrong at both ends, and no threshold lies between d03's wrong answer at
+   14% coverage and d01/d02's right answers at 11%.
+
+   Deliberately not shipped. Five data points are not a measurement, and this
+   would change the retrieval path all 30 passing tasks depend on. If you pick
+   it up: flag it off by default, run the two-arm grid across every task (the
+   question is "which tasks separate the arms", never "does it fix d03"), and
+   keep lexical as the fallback — the provider 503'd on a third of our calls
+   one afternoon this month.
+
+   The reason to do it is not d03. d01 and d02 pass today only because a
+   capable model rescues a bad ranking, and that is the same model-diligence
+   dependency the graded run punished twice in h01 and q01. d03 is the symptom;
+   the fragility is the disease.
+4. **A correction pass on `GAP_REPORT.md`.** Roughly eight figures in it are now
    stale — the tool count changed, `findings/001` was fixed, and some claims were
    re-derived and turned out weaker than written.
-4. **Findings we have measured but not written up:** 52 of 102 article addresses
+5. **Findings we have measured but not written up:** 52 of 102 article addresses
    contain a `/` that the form cannot produce; two customer records are published
    publicly; `KBArticle.tags` returns a list although declared as text.
 

@@ -482,6 +482,59 @@ one task flip between runs under the same model name. Both results are recorded.
 
 ## 9. What is pending
 
+### A0-r3. Round 3: what the graded Keystone run found, and what it cost
+
+The graded Keystone run of 21 October scored **11 of 15** and was the most
+useful result we have had, because two of its failures pass on our model and
+fail on the platform's. Our 14 of 15 was in-sample: we had tuned against a
+model diligent enough to iterate.
+
+| | graded 21 Oct | cause | now |
+|---|---|---|---|
+| `h01` | worked 1 ticket of 8 | the finish guard holds the model to `triage_queue`'s output, and the model never called `triage_queue` | the loop walks the queue from code, as it already does preflight |
+| `q01` | 5 draftable, 0 drafts | the guard asks at most 8 times and only while steps outnumber drafts outstanding | where the guard gives up, the loop writes the replies itself |
+| `s02` | not reached | our 26-minute budget, at ~8.5s per model call | the budget now reads Release 13's `AGENTSWITCH_SECONDS_LEFT` / `AGENTSWITCH_DEADLINE` |
+| `d03` | wrong article | unresolved, five attempts | still unresolved; attempt five recorded in its task file |
+
+**Two of the evaluator's four fixes we did not take, with reasons.**
+
+*Reorder `s02` before `h01`/`q01` as "a single-question task".* By measured
+history `s02` is the most expensive task we have - median **12** model calls
+over 14 samples, against `h01` 9.5 and `q01` 5 - so cheapest-first puts it
+last deliberately. `_expensive`'s docstring already records that inferring
+cost from wording "would have missed s02, the single most expensive task at
+12". The budget was the real cause and is fixed.
+
+*For `d03`, "only offer an article when it shares the problem words".* That is
+attempt (1) in d03's task file, refuted by `d01` and `d02`, whose correct
+answers share **none** of their questions' words. Also, the model is not
+matching the part number: `query_weights` reads only words of four letters or
+more, so `FG-CAB-3300` never matches - `step` and `frame` do, the product's
+name. We took their other suggestion instead, which filters nothing: each
+candidate now carries `missed`, and the payload carries
+`nothing_covers_request`. It separates the cases deterministically - d03 True,
+d01 False, d02 False - which four previous attempts could not, and it still
+did not reliably fix the task. Kept as information, not claimed as a fix.
+
+**Two failures of our own that this round's changes caused or exposed.**
+
+`q01` then failed a *full* Keystone run with "5 draftable, **7** drafts" - not
+duplicates, seven distinct tickets. Handed a pre-walked queue the model also
+re-walked, and drafted for two tickets triage had marked escalate. A ticket is
+marked escalate because no sendable article covers it, so those replies are
+ungrounded by construction; the accounting mismatch was the symptom, not the
+harm. `write_reply` now refuses a ticket its own triage did not mark
+draftable. Verified 3 of 3, with the guard firing in one of them.
+
+`r02` was lost to an HTTP 429 burst while three probes a minute later all
+answered. `official.py` never retried, although `run_one` has always supported
+attempts. It now retries one provider fault after a 20-second pause, and never
+retries a `revise`: an agent that answered wrongly is a result and must stand.
+
+**Both instances, re-measured on this code:** Suryodaya **16 of 16**, Keystone
+**13 of 14** in the full run, with `q01` fixed and `r02` passing 3 of 3 after
+it. `s02` was reached and approved for the first time in three runs.
+
 ### A0. Where both instances stand
 
 **Both are measured. Suryodaya is submitted and graded; Keystone is ready to

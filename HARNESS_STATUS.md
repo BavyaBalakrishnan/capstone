@@ -482,6 +482,43 @@ one task flip between runs under the same model name. Both results are recorded.
 
 ## 9. What is pending
 
+### A0-FINAL. The graded numbers, 24 October
+
+**Suryodaya 16 of 16. Keystone 14 of 15. 30 of 31, on the platform's own
+model, with `d03` the only failure.**
+
+Keystone went from 11 of 15 to 14 of 15, and the three tasks that moved are
+the three that failed on THEIR model while passing on ours - which is the
+whole reason the graded run was worth more to us than any local number.
+
+| task | graded 21 Oct | graded 24 Oct | what changed |
+|---|---|---|---|
+| `h01` | worked **1** ticket of 8 | **worked 8 of 8**, 5 drafted, 3 reported unanswerable | the loop walks the queue from code, as it already did preflight; and the detector was widened to match a teammate's wording |
+| `q01` | 5 draftable, **0 drafts** | **8 worked, 5 drafted, 3 escalated** | where the finish guard gives up the loop writes the replies itself, and `write_reply` refuses a ticket triage marked escalate |
+| `s02` | **not reached** | **approve**, "133/150 stamped" | the budget reads Release 13's `AGENTSWITCH_SECONDS_LEFT` / `AGENTSWITCH_DEADLINE` instead of assuming 26 minutes |
+| `d03` | wrong article | wrong article | unresolved after six measured attempts |
+
+Nothing came back "not reached" on either instance, so every task was
+actually judged - which had not been true of a Keystone run before.
+
+**`d03` is the one failure and it is deliberate.** It cited *"Cab step frame -
+damaged crate claims"* to answer a count shortage. Six fixes have been tried
+and rejected with evidence; the decisive measurement is that no coverage
+threshold separates this wrong answer at 14% of the request's terms from the
+RIGHT answers on `d01` and `d02` at 11%, because those are paraphrase cases
+whose correct article shares none of the question's words. The sixth attempt
+was the evaluator's own suggestion, implemented literally and measured with a
+paired A/B: 5 of 6 with it, 5 of 6 without. No effect, so it was reverted
+rather than shipped.
+
+What does separate the cases is semantic coverage, and the discriminator is
+the margin between the top two matches rather than the score: `d01` +0.117,
+`d02` +0.106, `d03` +0.009. `tools/semantic_probe.py` prints it. Not shipped -
+five data points, and it would change the retrieval path all 30 passing tasks
+depend on. The reason to do it is not `d03`: `d01` and `d02` pass today only
+because a capable model rescues a bad ranking, and that is the same
+model-diligence dependency the graded run punished twice.
+
 ### A0-r3. Round 3: what the graded Keystone run found, and what it cost
 
 The graded Keystone run of 21 October scored **11 of 15** and was the most

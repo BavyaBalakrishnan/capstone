@@ -319,7 +319,28 @@ def triage_queue(client, cap=None, status="new"):
         # going to a ticket this walk marked escalate. So the send decision is
         # still gated - once per reply, which is the right rate - and the
         # guarantee is unchanged.
-        kb = kb_candidates(client, query, check_coverage=False)
+        # Coverage ON here, over the whole sendable set.
+        #
+        # Three attempts on 2026-10-27 before this was right, and the two
+        # failures are worth knowing.
+        #
+        # Without any coverage, the walk's draft-versus-escalate decision came
+        # from lexical matching, so h01 reported "5 draftable" and write_reply
+        # then refused four of them - leaving 1 draft + 3 escalated to account
+        # for 8 tickets. q01 checks the same thing directly: drafts must match
+        # draftable. The walk's decision IS the accounting, so it has to be
+        # the real one.
+        #
+        # Judging only the one article lexical picked was worse: asking "does
+        # THIS article answer it" is the unstable question - TKT-2026-00074 was
+        # escalated here while write_reply allowed the very same ticket minutes
+        # earlier. "Which of these answers it, or NONE" is the stable one, and
+        # that is what kb_candidates asks.
+        #
+        # Cost: one comparison call per ticket with any lexical match, about 8
+        # on Keystone. The 78-minute wedge earlier was 10 of these on a
+        # timing-out endpoint with retries, not the calls themselves.
+        kb = kb_candidates(client, query)
         best = kb["usable"][0] if kb["usable"] else None
         rows.append({
             "ticket": _tno(t), "subject": t.get("subject"),

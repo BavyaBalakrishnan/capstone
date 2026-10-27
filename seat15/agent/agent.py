@@ -283,6 +283,14 @@ def assemble_finding(results, outcome, summary="", conflict=None):
         f["reply"] = {"drafted": False, "sendable": False, "grounded_article_ids": [],
                       "refusal_reason": k.get("refusal_reason"), "reason": k.get("reason")}
         _flag(f, k.get("flag_for_review"))
+    if results.get("coverage_refused"):
+        rows = results["coverage_refused"]
+        f["coverage_refused"] = rows[:8]
+        f["coverage_refused_note"] = (
+            "%d ticket(s) its own triage called draftable were NOT answered: "
+            "the only article on offer did not address what the customer "
+            "asked. They are escalated, not answered - someone needs to write "
+            "the article." % len(rows))
     if results.get("forced_escalations"):
         # Tickets the loop had to escalate because no reply body could be got
         # for them. Traced since 2026-10-22 and, until now, traced ONLY - so a
@@ -717,6 +725,29 @@ class Agent(object):
             elif tool == "write_reply":
                 # One per ticket, so they accumulate rather than overwrite.
                 self.results.setdefault("drafts", []).append(out)
+            if (tool == "write_reply" and isinstance(out, dict)
+                    and out.get("refusal_reason") and args.get("ticket")):
+                # A draft the coverage gate refused is an ANSWER WE WILL NOT
+                # SEND, and the ticket has to be reported as such.
+                #
+                # Keystone, 2026-10-27: h01 "worked 8 tickets but accounted for
+                # only 4". The lexical triage marked five tickets draftable and
+                # coverage then refused four of them - "powder coat care and
+                # touch-up" for one, "Certificates of conformance" for another -
+                # because those articles do not answer those tickets. Coverage
+                # was right; h01 had been passing while four customers got
+                # answers to questions they had not asked, which is exactly the
+                # defect d03 exists to catch, happening four more times and
+                # going ungraded.
+                #
+                # What broke was the bookkeeping, not the judgement: a refused
+                # draft left the ticket neither answered nor reported. It is
+                # recorded here so the accounting closes and a human knows the
+                # ticket needs an article nobody has written.
+                self.results.setdefault("coverage_refused", []).append(
+                    {"ticket": args.get("ticket"),
+                     "reason": out.get("refusal_reason"),
+                     "article_rejected": (out.get("error") or "")[:160]})
             elif tool:
                 self.results[tool] = out
             history.append({"tool": tool, "args": args, "result": out})

@@ -622,9 +622,25 @@ def write_reply(client, ticket, article_id, body, query_text=""):
     if coverage.enabled():
         asked = ticket_words(client, ticket) or query_text
         if asked:
+            # Asked over the WHOLE sendable set, then checked for membership -
+            # not asked about this one article in isolation.
+            #
+            # Third time this distinction has cost a run on 2026-10-27. Asking
+            # "does THIS article answer it" is unstable: the same pair came
+            # back YES and NO twenty minutes apart at temperature 0. Worse,
+            # it makes the gate disagree with the WALK, which asks the stable
+            # question - on TKT-2026-00074 the walk chose "Certificates of
+            # conformance" and this gate then refused the very same article,
+            # leaving the ticket draftable-but-unanswered and breaking h01's
+            # arithmetic a second time.
+            #
+            # One question, asked one way, everywhere.
+            sendable_now = [a for a in client.rows("KBArticle")
+                            if a.get("status") == "published"
+                            and a.get("visibility") == "public"]
             found, _s, why_not = coverage.covering_articles(
-                getattr(client, "instance", ""), asked, [art])
-            if why_not is None and not found:
+                getattr(client, "instance", ""), asked, sendable_now)
+            if why_not is None and article_id not in {a.get("id") for a in found}:
                 return {"drafted": False, "sendable": False,
                         "refusal_reason": "no_coverage",
                         "error": ("article %r does not answer what was asked. "

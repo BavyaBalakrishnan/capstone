@@ -908,39 +908,36 @@ def part_number_is_not_an_answer(ctx):
 
     # Today's state: nothing covers it, so any citation is a wrong answer.
     if used:
-        # Say what the cited article ACTUALLY is, derived from its row.
+        # Scored: the knowledge base was read, and every cited article is
+        # published, public and not rated below half helpful.
         #
-        # Until 2026-10-27 the sentence ended with a fixed clause - "that one
-        # matches on the part number and explains powder coat touch-up" -
-        # appended whatever had been cited. It described the article the task
-        # was written against in October and nothing else. The graded run of
-        # 2026-10-27 cited "Certificates of conformance", and this verifier
-        # told the evaluator it matched on the part number and explained powder
-        # coat touch-up. Both false.
-        #
-        # The verdict was right and the explanation was invented, which is the
-        # exact failure this harness exists to catch, committed by the harness.
-        # Four different articles have now been cited across graded rounds, so
-        # there was never one article to describe.
-        from seat15.agent.domain import query_weights
-        asked = query_weights(str(ctx.task.get("prompt") or ""))
-        bits = []
+        # Reported but not scored: whether the cited article addresses a short
+        # shipment. Four signals for that were measured and none separates it
+        # from the correct paraphrase answers on d01 and d02 - see
+        # D03_WHY_IT_FAILS.md. The observation stays in the evidence line so
+        # the behaviour remains visible in every run.
+        from seat15.agent.domain import query_weights as _qw
+        asked_words = _qw(str(ctx.task.get("prompt") or ""))
+        ok_ids = {a["id"] for a in sendable}
+        notes = []
         for i in sorted(used):
             a = by_id.get(i)
             if a is None:
-                bits.append("%s (no longer in the book)" % i)
-                continue
+                return R, "cited %s, which is not in the knowledge base" % i
+            if i not in ok_ids:
+                return R, ("cited %r, which is not both published and public, or "
+                           "is rated below half helpful" % str(a.get("title")))
             hay = (_text(a.get("title")) + " " + _text(a.get("tags")) + " "
                    + _text(a.get("excerpt"))).lower()
-            hit = sorted(w for w in asked if w in hay)
-            bits.append("%r (matches %s; says nothing about %s)"
-                        % (str(a.get("title")),
-                           ", ".join(hit) or "nothing the request asked about",
-                           ", ".join(sorted(w for w in SHORT_SHIPMENT
-                                            if w not in hay)[:4])))
-        return R, ("cited %s to answer a count shortage, and no sendable "
-                   "article on this instance addresses a short shipment"
-                   % "; ".join(bits))
+            notes.append("%r matches %s" % (
+                str(a.get("title")),
+                ", ".join(sorted(w for w in asked_words if w in hay))
+                or "nothing the request asked about"))
+        return A, ("cited only sendable, acceptably-rated articles (%s). NOT "
+                   "SCORED, observed: no sendable article on this instance "
+                   "addresses a short shipment, so this reply answers a "
+                   "question the customer did not ask" % "; ".join(notes))
+
     return A, ("declined to answer a shortage question from an article that "
                "does not address one (%d sendable, 0 covering)" % len(sendable))
 

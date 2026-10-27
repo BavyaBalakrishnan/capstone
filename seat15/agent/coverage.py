@@ -91,6 +91,9 @@ JUDGE_TOP = int(os.environ.get("SEAT15_JUDGE_TOP") or 3)
 EMBED_TIMEOUT = 90
 JUDGE_TIMEOUT = 60
 
+# The availability probe: short, because its whole job is to fail fast.
+PROBE_TIMEOUT = 15
+
 JUDGE_PROMPT = (
     "A customer wrote this:%(nl)s%(nl)s%(question)s%(nl)s%(nl)s"
     "Here is a help article:%(nl)s%(nl)sTITLE: %(title)s%(nl)s"
@@ -124,8 +127,42 @@ RETRY_PAUSE = 2.0
 BATCH_PAUSE = 1.5
 
 
+_PREFLIGHT = {}
+
+
+def available():
+    """Can this endpoint embed at all? One tiny call, once per process.
+
+    Without this the discovery cost is unbounded. The graded run supplies its
+    own OPENAI_BASE_URL and we cannot see whether it serves /embeddings; if it
+    does not, the failure budget would spend 3 failures x 3 attempts x the
+    90-second embed timeout - about thirteen minutes - finding that out, inside
+    a 30-minute budget. The fallback to lexical is safe; the cost of reaching
+    it was not.
+
+    So: one two-word input with a short timeout and no retries. It answers in
+    under a second when the endpoint works, and fails in PROBE_TIMEOUT when it
+    does not.
+    """
+    if "ok" in _PREFLIGHT:
+        return _PREFLIGHT["ok"]
+    cfg = _llm()
+    if cfg is None:
+        _PREFLIGHT["ok"] = False
+        return False
+    base, key, _ = cfg
+    try:
+        data = _post(base + "/embeddings", key,
+                     {"model": EMBED_MODEL, "input": ["probe"]},
+                     PROBE_TIMEOUT, retries=0)
+        _PREFLIGHT["ok"] = bool((data.get("data") or [{}])[0].get("embedding"))
+    except Exception:
+        _PREFLIGHT["ok"] = False
+    return _PREFLIGHT["ok"]
+
+
 def enabled():
-    return bool(os.environ.get("SEAT15_SEMANTIC_KB"))
+    return bool(os.environ.get("SEAT15_SEMANTIC_KB")) and available()
 
 
 def _llm():

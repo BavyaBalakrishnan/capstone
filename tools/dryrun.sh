@@ -71,7 +71,13 @@ IFS='|' read -r LB LK LM <<< "$LLM"
 
 cd "$OUT" || exit 1
 START=$(date +%s)
+# SEAT15_* flags pass through so an arm can be measured against the
+# default without editing this script. env -i drops everything else on
+# purpose, which on 2026-10-27 meant a run launched with
+# SEAT15_SEMANTIC_KB=1 silently measured the default instead.
 env -i PATH="$PATH" SYSTEMROOT="${SYSTEMROOT:-}" \
+  SEAT15_SEMANTIC_KB="${SEAT15_SEMANTIC_KB:-}" \
+  SEAT15_CACHE_DIR="${SEAT15_CACHE_DIR:-$ROOT/.cache}" \
   AGENTSWITCH_TOKEN="$TOK" AGENTSWITCH_INSTANCE="$INST" \
   OPENAI_BASE_URL="$LB" OPENAI_API_KEY="$LK" OPENAI_MODEL="$LM" \
   python -u -m seat15.harness.official > run.log 2>&1

@@ -803,8 +803,21 @@ class Agent(object):
         prompt = getattr(self, "_prompt", "") or ""
         if not prompt:
             return
+        if queue_request(prompt):
+            # A queue request is an instruction to the agent, not a customer's
+            # question, so "do the articles for THIS request exist but may not
+            # be sent" has no meaning for it - there is no single request, there
+            # are eight tickets, each already judged by the walk.
+            #
+            # Same scoping lesson as nothing_covers_request, which fired on 9 of
+            # 17 task-instances for exactly this reason. With coverage enabled
+            # it also costs a judge call on an operator instruction, which is
+            # both meaningless and the most expensive kind of waste in a
+            # 26-minute budget.
+            return
         try:
-            kb = domain.kb_candidates(self.c, prompt)
+            kb = domain.kb_candidates(self.c, prompt,
+                                      check_coverage=False)
         except Exception:
             return
         if kb.get("refusal_reason") != "not_publishable":

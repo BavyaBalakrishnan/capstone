@@ -34,19 +34,14 @@ results = "results.json"
 # budget at that speed. If the endpoint is slow at grading time, expect the
 # last task or two to come back "not reached" - that is the pacing logic
 # protecting the budget, not a failure.
-# Semantic coverage is ON from 2026-10-27, defaulted in code rather than set
-# here: we cannot see whether the platform runs the `run` string through a
-# shell, so a SEAT15_SEMANTIC_KB=1 prefix could be silently dropped. To grade
-# the lexical path instead, set SEAT15_SEMANTIC_KB=0.
+# Semantic coverage is OFF. SEAT15_SEMANTIC_KB=1 enables it; do not, without
+# reading D03_WHY_IT_FAILS.md first.
 #
-# What it changes: which article the agent may send. Coverage asks the model
-# one question - "which of these sendable articles answers this ticket, or
-# NONE" - and the answer decides, where keyword overlap decided before. It
-# fixes d03, and on Keystone it also stops four replies in h01 being grounded
-# in articles that do not answer their tickets.
-#
-# What it costs: one model call per ticket in a queue walk. Measured at ~55s
-# for an 8-ticket walk on a healthy endpoint. If the endpoint is slow the last
-# tasks in the queue are the ones at risk of "not reached".
+# The graded Keystone run with it on scored 13 of 15 against 14 of 15 without:
+# it did not fix d03, and it cost s03. Three signals for "does this article
+# answer this ticket" have now been measured and all three fail - lexical
+# overlap is inverted, the embedding margin does not generalise beyond the
+# handful of cases it was fitted to, and a model judge is model-dependent,
+# which is fatal when the grading model is not ours.
 instances = ["keystone"]
 timeout_minutes = 30

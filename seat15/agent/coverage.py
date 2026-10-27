@@ -180,10 +180,23 @@ def enabled():
     `available()` still gates it, so an endpoint that cannot serve the judge
     costs one 15-second probe and then behaves exactly as the lexical path.
     """
-    flag = os.environ.get("SEAT15_SEMANTIC_KB")
-    if flag is not None and flag.strip() in ("0", "", "off", "false", "no"):
-        return False
-    return available()
+    # OFF by default again, from 2026-10-27 evening. Set SEAT15_SEMANTIC_KB=1
+    # to measure it.
+    #
+    # The graded Keystone run with it on scored 13 of 15 against 14 of 15
+    # without. It did not fix d03 - the platform's model answered the coverage
+    # question by citing "Certificates of conformance" where ours says NONE -
+    # and it cost s03, which filed no count for tickets with no SLA clock,
+    # consistent with the extra model call per ticket eating the budget.
+    #
+    # The deeper reason is architectural, and it is this repo's own rule:
+    # the domain decides facts, the model picks tools and outcomes. Every fix
+    # that transferred to the platform's model this month moved a decision INTO
+    # code - the forced queue walk, the article-id correction, the loop writing
+    # outstanding replies. Coverage moved one OUT of code, handing "does this
+    # article answer this ticket" back to the model. A weaker model answers it
+    # worse, so it could not transfer.
+    return bool(os.environ.get("SEAT15_SEMANTIC_KB")) and available()
 
 
 def _llm():

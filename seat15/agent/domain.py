@@ -304,7 +304,22 @@ def triage_queue(client, cap=None, status="new"):
                       if party and x.get("party_id") == party
                       and x.get("status") not in ("closed", "resolved")])
         query = "%s %s" % (t.get("subject") or "", t.get("description") or "")
-        kb = kb_candidates(client, query)
+        # NO coverage check here, deliberately.
+        #
+        # This loop runs once per ticket, so a coverage call inside it is
+        # multiplied by the queue. Measured 2026-10-27: i01 is a queue request,
+        # the loop walks it from code before the model is asked anything, and
+        # with coverage on that became 10 judge calls of up to three attempts
+        # each. At 14.4s a call the task sat for 78 minutes with one trace line
+        # and looked like a hang.
+        #
+        # It is also unnecessary. This walk only decides draft versus
+        # escalate; nothing is sent here. write_reply applies coverage to the
+        # article it is actually handed, and _only_draftable stops a reply
+        # going to a ticket this walk marked escalate. So the send decision is
+        # still gated - once per reply, which is the right rate - and the
+        # guarantee is unchanged.
+        kb = kb_candidates(client, query, check_coverage=False)
         best = kb["usable"][0] if kb["usable"] else None
         rows.append({
             "ticket": _tno(t), "subject": t.get("subject"),
@@ -854,7 +869,7 @@ def code_is_none(out, top_match):
     return bool(preferred or unproven)
 
 
-def kb_candidates(client, query):
+def kb_candidates(client, query, check_coverage=True):
     """Articles matching `query`, each labelled with whether it may be SENT.
 
     Sendable means published AND public — 10 of 100 on Suryodaya. An article can
@@ -917,7 +932,7 @@ def kb_candidates(client, query):
     # the answer exists and is internal, and it could only say no_coverage if
     # this looked at sendable articles alone.
     semantic = None
-    if coverage.enabled():
+    if check_coverage and coverage.enabled():
         # Only the SENDABLE articles. This decision is "what may be sent to a
         # customer", and the refusal codes - which need to know whether
         # material exists in any status - stay with the lexical ranking.

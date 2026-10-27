@@ -544,6 +544,10 @@ class Agent(object):
         # model still decides what to do with each ticket; it no longer decides
         # whether to look. Gated so the grid can move exactly this one thing.
         if queue_request(prompt) and not os.environ.get("SEAT15_NO_FORCED_TRIAGE"):
+            # Traced BEFORE the walk, not after. On 2026-10-27 a wedged walk
+            # left exactly one trace line - the preflight - so 78 minutes of
+            # work in progress was indistinguishable from a hung process.
+            self.trace({"event": "triage_queue_from_code_starting"})
             try:
                 q = self._dispatch("triage_queue", {})
                 if isinstance(q, dict) and "error" not in q:

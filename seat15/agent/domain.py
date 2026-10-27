@@ -557,7 +557,8 @@ def ticket_words(client, ticket_ref):
     return "%s %s" % (t.get("subject") or "", t.get("description") or "")
 
 
-def write_reply(client, ticket, article_id, body, query_text=""):
+def write_reply(client, ticket, article_id, body, query_text="",
+                coverage_settled=False):
     """Take the model's prose and attach a provenance line it cannot fake.
 
     GD_Week2 Q1, answered 2026-10-03: a full reply plus a line telling the
@@ -619,7 +620,7 @@ def write_reply(client, ticket, article_id, body, query_text=""):
     # Asked about the TICKET's words when there is a ticket, and about the
     # request otherwise, because d03 arrives with no ticket at all - which is
     # how it slipped past the not_on_topic rule below.
-    if coverage.enabled():
+    if coverage.enabled() and not coverage_settled:
         asked = ticket_words(client, ticket) or query_text
         if asked:
             # Asked over the WHOLE sendable set, then checked for membership -

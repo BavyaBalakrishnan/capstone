@@ -504,9 +504,29 @@ class Agent(object):
             # needs something to check against and d03 arrives with no ticket:
             # ticket_words() is empty there, so without this the gate added on
             # 2026-10-27 would silently not run on the one task it was for.
+            # If the queue walk already settled coverage for this ticket and
+            # this article, do not ask again.
+            #
+            # Asking twice is the bug, not which form the question takes. Both
+            # sides now ask the stable comparison over the whole sendable set,
+            # and they STILL disagreed on 2 of 4 tickets in q01 on 2026-10-27
+            # - because the model does not answer identically twice, even at
+            # temperature 0 on the same question. Every variant of this has
+            # surfaced the same way: a ticket the walk called draftable that
+            # nothing ever drafted, and arithmetic that will not close.
+            #
+            # The walk's decision is the record. A second opinion on it can
+            # only ever introduce a contradiction.
+            rows = (self.results.get("triage_queue") or {}).get("tickets") or []
+            row = next((r for r in rows
+                        if r.get("ticket") == args.get("ticket")), None)
+            settled = bool(row and row.get("decision") == "draft"
+                           and (row.get("article") or {}).get("id")
+                           == args.get("article_id"))
             return domain.write_reply(self.c, args.get("ticket"),
                                       args.get("article_id"), args.get("body"),
-                                      query_text=getattr(self, "_prompt", "") or "")
+                                      query_text=getattr(self, "_prompt", "") or "",
+                                      coverage_settled=settled)
         if tool == "read_entity":
             cap = domain.seat_capability(self.c, args.get("entity", ""))
             self.results.setdefault("_capabilities", []).append(cap)

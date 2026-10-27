@@ -491,6 +491,14 @@ class Agent(object):
                                  "to-dos for tickets a triage escalated"}
             return domain.file_todos(self.c, q, cap=args.get("cap"),
                                      run_id=self.run_id)
+        if tool == "write_reply":
+            # The request's own words go with it, because a coverage check
+            # needs something to check against and d03 arrives with no ticket:
+            # ticket_words() is empty there, so without this the gate added on
+            # 2026-10-27 would silently not run on the one task it was for.
+            return domain.write_reply(self.c, args.get("ticket"),
+                                      args.get("article_id"), args.get("body"),
+                                      query_text=getattr(self, "_prompt", "") or "")
         if tool == "read_entity":
             cap = domain.seat_capability(self.c, args.get("entity", ""))
             self.results.setdefault("_capabilities", []).append(cap)

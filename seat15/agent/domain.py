@@ -513,7 +513,15 @@ def _ticket_query(client, ticket_ref):
     return "%s %s" % (t.get("subject") or "", t.get("description") or "")
 
 
-def write_reply(client, ticket, article_id, body):
+def ticket_words(client, ticket_ref):
+    """A ticket's own words, or "" when there is no ticket."""
+    t = get_ticket(client, ticket_ref) if ticket_ref else None
+    if not t:
+        return ""
+    return "%s %s" % (t.get("subject") or "", t.get("description") or "")
+
+
+def write_reply(client, ticket, article_id, body, query_text=""):
     """Take the model's prose and attach a provenance line it cannot fake.
 
     GD_Week2 Q1, answered 2026-10-03: a full reply plus a line telling the
@@ -562,6 +570,32 @@ def write_reply(client, ticket, article_id, body):
     if band == "blocked":
         return {"drafted": False, "error": "article %r is in the blocked band (%s/%s)"
                 % (article_id, art.get("helpful_count"), art.get("not_helpful_count"))}
+
+    # Coverage applies here too, not only in kb_candidates.
+    #
+    # Defect 1 in D03_WHY_IT_FAILS.md: there are three ways a reply gets
+    # grounded and they did not agree. kb_candidates was gated on 2026-10-27
+    # and this was not, so a model that passed an article id straight to
+    # write_reply - an id it could read from `top` or `all_sendable` - drafted
+    # whatever it named. The i04 hole was reopened twice by exactly this, both
+    # times because a new door was added without the check behind it.
+    #
+    # Asked about the TICKET's words when there is a ticket, and about the
+    # request otherwise, because d03 arrives with no ticket at all - which is
+    # how it slipped past the not_on_topic rule below.
+    if coverage.enabled():
+        asked = ticket_words(client, ticket) or query_text
+        if asked:
+            found, _s, why_not = coverage.covering_articles(
+                getattr(client, "instance", ""), asked, [art])
+            if why_not is None and not found:
+                return {"drafted": False, "sendable": False,
+                        "refusal_reason": "no_coverage",
+                        "error": ("article %r does not answer what was asked. "
+                                  "It may be sendable, and sending a customer a "
+                                  "confident answer to a question they did not "
+                                  "ask is worse than saying nothing is available"
+                                  % art.get("title"))}
 
     # Does this article have anything to do with what the customer asked?
     #
@@ -884,8 +918,20 @@ def kb_candidates(client, query):
     # this looked at sendable articles alone.
     semantic = None
     if coverage.enabled():
+        # Only the SENDABLE articles. This decision is "what may be sent to a
+        # customer", and the refusal codes - which need to know whether
+        # material exists in any status - stay with the lexical ranking.
+        #
+        # It is also what makes the judge-first path reachable: the sendable
+        # set is 10 on Suryodaya and 25 on Keystone, while the whole book is
+        # 102 and 34. Passing `every` here would push Suryodaya past
+        # CHOOSE_LIMIT and back onto embeddings for no benefit.
+        sendable_only = [a for a in every
+                         if a.get("status") == "published"
+                         and a.get("visibility") == "public"]
         found, _shortlist, why_not = coverage.covering_articles(
-            client.instance if hasattr(client, "instance") else "", query, every)
+            client.instance if hasattr(client, "instance") else "",
+            query, sendable_only)
         if why_not is None:
             semantic = {a.get("id") for a in found}
     best = out[0]["score"] if out else 0

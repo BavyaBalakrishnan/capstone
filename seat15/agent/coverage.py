@@ -167,7 +167,23 @@ def available():
 
 
 def enabled():
-    return bool(os.environ.get("SEAT15_SEMANTIC_KB")) and available()
+    """On by default, from 2026-10-27. SEAT15_SEMANTIC_KB=0 turns it off.
+
+    Defaulted in CODE rather than through the environment on purpose. The
+    graded run's command is `python -m seat15.harness.official` from the toml,
+    and we cannot see whether the platform puts that through a shell - so a
+    `SEAT15_SEMANTIC_KB=1` prefix might be silently dropped and we would grade
+    the default while believing otherwise. That exact failure wasted an hour
+    this afternoon when env -i swallowed the flag and an arm reported itself
+    identical to the baseline because it never ran.
+
+    `available()` still gates it, so an endpoint that cannot serve the judge
+    costs one 15-second probe and then behaves exactly as the lexical path.
+    """
+    flag = os.environ.get("SEAT15_SEMANTIC_KB")
+    if flag is not None and flag.strip() in ("0", "", "off", "false", "no"):
+        return False
+    return available()
 
 
 def _llm():

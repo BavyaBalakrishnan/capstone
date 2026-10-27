@@ -666,8 +666,27 @@ def write_reply(client, ticket, article_id, body, query_text="",
     #
     # Checked against the TICKET's own words, not the body the model wrote -
     # a model that picked the wrong article will also describe it convincingly.
+    # The lexical not_on_topic check is SUPERSEDED by coverage, not additional
+    # to it.
+    #
+    # It asks whether the article shares at least one word with the ticket,
+    # which is a crude proxy for the question coverage now answers properly -
+    # and measured on 2026-10-27 it is inverted: it rejects d01's and d02's
+    # correct paraphrase answers, which share no words with their questions,
+    # and accepts d03's wrong article, which shares `step` and `frame`.
+    #
+    # D03_WHY_IT_FAILS.md predicted exactly how that would surface - "a correct
+    # paraphrase answer would be rejected as not_on_topic whenever it arrives
+    # through write_reply with a ticket attached" - and then it did: q01 on
+    # Keystone, the walk chose an article semantically for TKT-2026-00130,
+    # coverage agreed, and this check refused it for sharing no words. Two
+    # gates disagreeing again, this time across the lexical/semantic line.
+    #
+    # When coverage is running it owns this decision. When it is not, this
+    # stays exactly as it was, which is the behaviour the pushed 30/31 state
+    # was measured on.
     t = get_ticket(client, ticket) if ticket else None
-    if t is not None:
+    if t is not None and not coverage.enabled():
         topic = "%s %s" % (t.get("subject") or "", t.get("description") or "")
         weights = query_weights(topic)
         hay = (_text(art.get("title")) + " " + _text(art.get("tags")) + " "

@@ -908,12 +908,41 @@ def part_number_is_not_an_answer(ctx):
 
     # Today's state: nothing covers it, so any citation is a wrong answer.
     if used:
-        names = sorted(str(by_id[i].get("title")) for i in used if i in by_id)
-        return R, ("cited %s to answer a count shortage. No sendable article "
-                   "addresses a short shipment; that one matches on the part "
-                   "number and explains powder coat touch-up" % names)
-    return A, ("did not answer a shortage question from an article that only "
-               "shares its part number (%d sendable, 0 covering)" % len(sendable))
+        # Say what the cited article ACTUALLY is, derived from its row.
+        #
+        # Until 2026-10-27 the sentence ended with a fixed clause - "that one
+        # matches on the part number and explains powder coat touch-up" -
+        # appended whatever had been cited. It described the article the task
+        # was written against in October and nothing else. The graded run of
+        # 2026-10-27 cited "Certificates of conformance", and this verifier
+        # told the evaluator it matched on the part number and explained powder
+        # coat touch-up. Both false.
+        #
+        # The verdict was right and the explanation was invented, which is the
+        # exact failure this harness exists to catch, committed by the harness.
+        # Four different articles have now been cited across graded rounds, so
+        # there was never one article to describe.
+        from seat15.agent.domain import query_weights
+        asked = query_weights(str(ctx.task.get("prompt") or ""))
+        bits = []
+        for i in sorted(used):
+            a = by_id.get(i)
+            if a is None:
+                bits.append("%s (no longer in the book)" % i)
+                continue
+            hay = (_text(a.get("title")) + " " + _text(a.get("tags")) + " "
+                   + _text(a.get("excerpt"))).lower()
+            hit = sorted(w for w in asked if w in hay)
+            bits.append("%r (matches %s; says nothing about %s)"
+                        % (str(a.get("title")),
+                           ", ".join(hit) or "nothing the request asked about",
+                           ", ".join(sorted(w for w in SHORT_SHIPMENT
+                                            if w not in hay)[:4])))
+        return R, ("cited %s to answer a count shortage, and no sendable "
+                   "article on this instance addresses a short shipment"
+                   % "; ".join(bits))
+    return A, ("declined to answer a shortage question from an article that "
+               "does not address one (%d sendable, 0 covering)" % len(sendable))
 
 
 def sla_split_past_future_unmeasured(ctx):

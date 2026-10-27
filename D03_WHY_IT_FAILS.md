@@ -97,6 +97,25 @@ The signal is wrong at both ends, which is why no threshold works.
   `frame`, the product's name, and neither mentions short, count, pieces,
   shipment, arrived or packed.
 
+**Correction, 2026-10-27.** Calling this a "product-name match" was too
+narrow. Across graded rounds the agent has cited **four different** articles:
+*Blanket orders and release schedules*, *Cab step frame - damaged crate
+claims*, *FG-CAB-3300 cab step frame - powder coat care*, and *Certificates of
+conformance*. The last shares no product word at all. So the selection is not
+a consistent bias toward the product's name - it is closer to noise among weak
+matches, which is a stronger version of the same conclusion: the lexical score
+carries so little signal that which wrong article wins is close to arbitrary.
+
+That also exposed a defect in our own verifier, now fixed. Its failure message
+ended with a fixed clause - "that one matches on the part number and explains
+powder coat touch-up" - appended whatever had been cited. When the graded run
+cited *Certificates of conformance*, we told the evaluator it matched on the
+part number and explained powder coat touch-up. Both false. The verdict was
+right and the explanation was invented, which is the exact failure this
+harness exists to catch, committed by the harness. The message is now derived
+from the cited row: what it matches, and which short-shipment phrases it never
+mentions.
+
 The measurement that settles it: d03's wrong answer covers **14%** of the
 request's terms and d01/d02's *right* answers cover **11%**. No threshold lies
 between them. That is attempt (4) in the task file and it is why attempts (1)

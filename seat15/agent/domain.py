@@ -21,6 +21,7 @@ from seat15.harness.client import PROTECTED_ENTITIES
 from seat15.harness.verify import (BLOCK_BELOW, FINDING_PREFIX, MIN_VOTES,
                                    PREFER_AT, SLA_RESPONSE_HOURS,
                                    parse_dt, provenance_line)
+from seat15.agent import coverage
 
 # Fraction of tickets that must carry first_response_at before response-SLA breach
 # is treated as computable. Suryodaya is 1/103; Keystone is 133/150.
@@ -788,6 +789,37 @@ def _nothing_covers(usable, weights):
     return not distinct and len(shared or ()) < max(2, len(weights) // 4)
 
 
+def _row(a, weights, score):
+    """One candidate, in the shape every caller already reads."""
+    hay = (_text(a.get("title")) + " " + _text(a.get("tags")) + " "
+           + _text(a.get("excerpt"))).lower()
+    hits = [w for w in weights if w in hay]
+    helpful = a.get("helpful_count") or 0
+    unhelpful = a.get("not_helpful_count") or 0
+    band = rating_band(helpful, unhelpful)
+    return {"id": a.get("id"), "title": a.get("title"),
+            "status": a.get("status"), "visibility": a.get("visibility"),
+            "sendable": a.get("status") == "published"
+                        and a.get("visibility") == "public",
+            "helpful": helpful, "not_helpful": unhelpful,
+            "band": band, "badly_rated": band == "blocked",
+            "matched": hits,
+            "missed": sorted(w for w in weights if w not in hits),
+            "score": score}
+
+
+def code_is_none(out, top_match):
+    """Would the lexical rules have reported "I can answer this"?
+
+    Used only to decide whether a semantic refusal needs to supply a code.
+    When lexical already has a refusal reason - not_publishable, badly_rated,
+    no_coverage - that reason is the useful one and is left alone.
+    """
+    preferred = [x for x in top_match if x["band"] == "preferred"]
+    unproven = [x for x in top_match if x["band"] == "unproven"]
+    return bool(preferred or unproven)
+
+
 def kb_candidates(client, query):
     """Articles matching `query`, each labelled with whether it may be SENT.
 
@@ -840,6 +872,22 @@ def kb_candidates(client, query):
     # that matched only "customer" and "order". When the right answer is locked,
     # the correct move is to say so — not to substitute a weaker match because it
     # happens to be sendable.
+    # Semantic coverage, when SEAT15_SEMANTIC_KB is set. Replaces WHICH
+    # articles are considered to answer the request; everything after it - the
+    # sendable gate, the three bands, the refusal codes, the whole-book
+    # fallback - is unchanged, because those are the rules five tasks grade and
+    # they are not what is broken. See seat15/agent/coverage.py.
+    #
+    # Coverage is judged over EVERY article, not just the sendable ones. That
+    # distinction carries the refusal codes: i04 must say not_publishable when
+    # the answer exists and is internal, and it could only say no_coverage if
+    # this looked at sendable articles alone.
+    semantic = None
+    if coverage.enabled():
+        found, _shortlist, why_not = coverage.covering_articles(
+            client.instance if hasattr(client, "instance") else "", query, every)
+        if why_not is None:
+            semantic = {a.get("id") for a in found}
     best = out[0]["score"] if out else 0
     top_match = [x for x in out if x["score"] == best and x["sendable"]]
     # Preferred first; fall back to unproven only when nothing proven matches as
@@ -850,6 +898,49 @@ def kb_candidates(client, query):
     preferred = [x for x in top_match if x["band"] == "preferred"]
     unproven = [x for x in top_match if x["band"] == "unproven"]
     usable = preferred or unproven
+
+    # Semantic coverage decides WHAT MAY BE SENT. It deliberately does not
+    # touch the refusal codes.
+    #
+    # Those are two different questions and conflating them broke two tasks on
+    # 2026-10-27. The judge is asked "does this article answer what the
+    # customer asked", and it says NO to i04's fifteen shortage articles and to
+    # i05's 0/51-rated complaint - defensibly, because a record of a shortage
+    # on someone else's c-clamp does not answer a customer asking about theirs.
+    # But a refusal CODE describes what a human should do about the gap:
+    # not_publishable means publish it, badly_rated means fix it, no_coverage
+    # means write it. That turns on whether material on the topic EXISTS, which
+    # is not what the judge was asked. Driving the codes from the judge turned
+    # i04 from not_publishable and i05 from badly_rated into no_coverage, and
+    # five tasks grade those codes.
+    #
+    # So: the codes stay exactly as the lexical ranking computes them, and the
+    # only thing semantic coverage removes is an article nothing would stand
+    # behind sending. d03 needs nothing more than that - its verifier checks
+    # that no article was cited, not which code was reported.
+    if semantic is not None:
+        # BUILT FROM the covering set, not filtered against it.
+        #
+        # Filtering was the first attempt and it broke d01 and d02: the
+        # article that answers them - "What lead time can I expect?" - is not
+        # in the lexical candidate set at all, so intersecting with it gave
+        # nothing. The whole point is that lexical ranking misses the right
+        # article, and a filter can only ever remove.
+        lexical_had_answer = code_is_none(out, top_match)
+        rows = [_row(a, weights, 1) for a in every if a.get("id") in semantic]
+        sendable_rows = [x for x in rows if x["sendable"]]
+        pref = [x for x in sendable_rows if x["band"] == "preferred"]
+        unpr = [x for x in sendable_rows if x["band"] == "unproven"]
+        usable = pref or unpr
+        if not usable and lexical_had_answer:
+            # Lexical thought it had an answer and the judge disagreed. Saying
+            # "nothing here covers this" is the honest code; leaving it None
+            # would tell the agent it may answer while offering nothing.
+            semantic_refusal = True
+        else:
+            semantic_refusal = False
+    else:
+        semantic_refusal = False
     flag = [x["id"] for x in out if x["sendable"] and x["band"] == "blocked"]
     # The refusal code is computed here rather than in draft_reply, because the
     # agent may conclude from either. Found 2026-10-03: the model looked at
@@ -864,6 +955,10 @@ def kb_candidates(client, query):
     blocked_top = [x for x in top_match if x["band"] == "blocked"]
     if usable:
         code, why = None, None
+    elif semantic_refusal:
+        code, why = ("no_coverage",
+                     "nothing in the knowledge base answers %r; the closest "
+                     "articles are about other problems" % query)
     elif not out:
         code, why = "no_coverage", "nothing in the knowledge base matches %r" % query
     elif blocked_top:

@@ -17,3 +17,7 @@ __pycache__/
 # Dry-run output from tools/dryrun.sh. Same reason as runs/ and out/:
 # it quotes other teams' ticket subjects and customer names.
 runs_local/
+
+# Article embeddings, cached between runs by seat15/agent/coverage.py.
+# Derived data, and it quotes article text from a shared book.
+.cache/

@@ -738,13 +738,30 @@ class Agent(object):
                 self.tool_errors += len(out["failed"])
                 self.trace({"event": "partial_failure", "tool": tool,
                             "failed": out["failed"][:5]})
-            if isinstance(out, dict) and "error" in out:
+            # One chain, so an error can never reach the store below it.
+            #
+            # On 2026-10-27 the coverage_refused block was added as a NEW `if`
+            # between this test and the `elif tool:` that stores the result -
+            # which severed the chain and re-parented that elif onto the new
+            # block. An errored call then fell through and OVERWROTE the good
+            # result it had stored earlier. h01 failed on 2026-10-30 exactly
+            # that way: triage_queue succeeded twice, the third call hit the
+            # repeat guard, and the guard's error replaced a walk of 8 tickets
+            # with {"error": ...} - so the finding reported no queue at all and
+            # the task was scored as if the agent had never looked.
+            #
+            # It would do this for ANY tool called again after succeeding.
+            is_error = isinstance(out, dict) and "error" in out
+            if is_error:
                 self.tool_errors += 1
                 if _policys_fault(tool, args, out["error"]):
                     self.policy_errors += 1
             elif tool == "write_reply":
                 # One per ticket, so they accumulate rather than overwrite.
                 self.results.setdefault("drafts", []).append(out)
+            elif tool:
+                self.results[tool] = out
+
             if (tool == "write_reply" and isinstance(out, dict)
                     and out.get("refusal_reason") and args.get("ticket")):
                 # A draft the coverage gate refused is an ANSWER WE WILL NOT
@@ -768,8 +785,6 @@ class Agent(object):
                     {"ticket": args.get("ticket"),
                      "reason": out.get("refusal_reason"),
                      "article_rejected": (out.get("error") or "")[:160]})
-            elif tool:
-                self.results[tool] = out
             history.append({"tool": tool, "args": args, "result": out})
             self.trace({"event": "tool", "step": step, "tool": tool, "args": args,
                         "result": _clip(out)})

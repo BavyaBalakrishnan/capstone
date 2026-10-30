@@ -101,13 +101,24 @@ def _token_budget():
     300k one. A ceiling we cannot see is still a ceiling, so the runner keeps
     its own count and stops deliberately rather than being refused mid-task.
     """
-    # 270,000 against the platform's 300,000 a run, the same 10% margin the
-    # time budget keeps against the 30-minute cap.
+    # 290,000 against the platform's 300,000 a run.
     #
-    # It was 420,000, which is ABOVE their cap - so even had the guard worked,
-    # it would have stopped us only after the platform had already cut us off.
-    # The graded Keystone run of 2026-10-21 reported 375,019 tokens.
-    return int(os.environ.get("SEAT15_TOKEN_BUDGET") or 270000)
+    # It was 420,000 - above their cap - and unreachable anyway, because
+    # health["tokens"] was never set so `spent` stayed 0 and this guard had
+    # never fired. Repairing the counter on 2026-10-30 made it live for the
+    # first time, and 270,000 then skipped q01 and s02 on that day's graded
+    # run: our own run of the same suite spends 195,319, but the platform's
+    # model is more verbose - its Keystone run of 2026-10-21 reported 375,019.
+    #
+    # So the margin sits just under their cap, for the same reason the time
+    # margin is now 90 seconds: being cut off costs the task in flight, which
+    # is the task stopping early costs too. Keeping back 30,000 tokens buys
+    # nothing and can cost a task.
+    #
+    # If their model needs more than 300,000 for these 15 tasks, no ceiling
+    # here will help and the per-task cost has to come down - q01 alone is 26
+    # model calls.
+    return int(os.environ.get("SEAT15_TOKEN_BUDGET") or 290000)
 
 
 # Kept back from whatever deadline we are given, for the same reason 26 was
@@ -261,10 +272,18 @@ def main(argv=None):
         inst = instance if instance in task["instances"] else "fixture"
         reserve = max(RESERVE_SECONDS, _likely_seconds(task, rows, started))
         if time.time() > deadline - reserve:
-            skipped.append(task)
+            skipped.append((task, "time"))
             continue
         if spent[0] > _token_budget():
-            skipped.append(task)
+            # Recorded as its own reason. Both skips used to report "not
+            # reached in the time budget", so a run stopped by TOKENS said the
+            # clock had beaten it - and on the graded Keystone run of
+            # 2026-10-30 that is exactly what happened: q01 and s02 were
+            # skipped on tokens, the summary blamed time, and the run had
+            # finished well inside its minutes. A skip that misreports its own
+            # cause sends the next reader at the wrong problem, which is the
+            # failure this harness exists to prevent.
+            skipped.append((task, "tokens"))
             continue
 
         # The no-model baseline runs ONLY when there is no model to grade, or
@@ -359,11 +378,13 @@ def main(argv=None):
         _write(RESULTS, doc)
         print("  %-44s %s" % (task["id"][:44], verdict))
 
-    for task in skipped:
+    for task, why in skipped:
         inst = instance if instance in task["instances"] else "fixture"
-        rows.append(_row(task, inst, "not_run",
-                         "not reached inside the time budget; reported as a "
-                         "failure rather than assumed to pass"))
+        reason = ("not reached: the %s budget was spent before this task "
+                  "started; reported as a failure rather than assumed to pass"
+                  % ("time" if why == "time" else
+                     "token budget of %s" % format(_token_budget(), ",")))
+        rows.append(_row(task, inst, "not_run", reason))
     doc = {"tasks": rows, "summary": _summary(rows, skipped, instance, model, unjudged)}
     _write(RESULTS, doc)
     print("\n%s" % doc["summary"])
@@ -381,7 +402,15 @@ def _summary(rows, skipped, instance, model, unjudged=()):
     if not model:
         parts.append("no model was available, so this is the fixed-script arm")
     if skipped:
-        parts.append("%d not reached in the time budget" % len(skipped))
+        by_time = [t for t, why in skipped if why == "time"]
+        by_tokens = [t for t, why in skipped if why == "tokens"]
+        if by_time:
+            parts.append("%d not reached in the time budget (%s)"
+                         % (len(by_time), ", ".join(t["id"] for t in by_time)))
+        if by_tokens:
+            parts.append("%d not reached: the token budget of %s was spent "
+                         "(%s)" % (len(by_tokens), format(_token_budget(), ","),
+                                   ", ".join(t["id"] for t in by_tokens)))
     gone = [t for t, why, _ in unjudged if why == "premise"]
     broke = [t for t, why, _ in unjudged if why != "premise"]
     if gone:

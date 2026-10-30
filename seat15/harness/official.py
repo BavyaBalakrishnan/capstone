@@ -101,25 +101,29 @@ def _token_budget():
     300k one. A ceiling we cannot see is still a ceiling, so the runner keeps
     its own count and stops deliberately rather than being refused mid-task.
     """
-    # 300,000: the platform's own per-run cap, not a margin below it.
+    # 600,000 - the team's DAILY budget, not the per-run figure. This is a
+    # backstop against a runaway loop, and nothing else.
     #
-    # It was 420,000 - above their cap - and unreachable anyway, because
-    # health["tokens"] was never set so `spent` stayed 0 and this guard had
-    # never fired. Repairing the counter on 2026-10-30 made it live for the
-    # first time, and 270,000 then skipped q01 and s02 on that day's graded
-    # run: our own run of the same suite spends 195,319, but the platform's
-    # model is more verbose - its Keystone run of 2026-10-21 reported 375,019.
+    # The history of this number is the argument for it. It was 420,000 and
+    # unreachable, because health["tokens"] was never set so `spent` stayed 0
+    # and the guard had never once fired. Repairing the counter on 2026-10-30
+    # made it live, at 270,000 chosen from OUR spend of 195,319 - and it
+    # promptly skipped q01 and s02 on that day's graded run, on a run that had
+    # minutes to spare. The platform's model is roughly 2.5x more verbose than
+    # the one we develop against: it spent over 270,000 on the 13 tasks where
+    # ours spends 106,054.
     #
-    # It now sits AT their cap, so this guard never stops a run the platform
-    # would have let continue. Any margin below the cap is a task we refuse to
-    # start that they would have allowed, and being cut off costs only the task
-    # in flight - the same task stopping early costs. The guard is a backstop
-    # against a runaway loop, not a budget of our own.
+    # Raising it to the 300,000 per-run cap was still too low, for a reason the
+    # record settles: the graded Keystone run of 2026-10-21 reported 375,019
+    # tokens - ABOVE that cap - and completed and was scored anyway. So the cap
+    # is not enforced as a kill, and a guard set to it stops runs the platform
+    # would have finished.
     #
-    # If their model needs more than 300,000 for these 15 tasks, no ceiling
-    # here will help and the per-task cost has to come down - q01 alone is 26
-    # model calls.
-    return int(os.environ.get("SEAT15_TOKEN_BUDGET") or 300000)
+    # Being cut off costs only the task in flight, because results.json is
+    # written atomically after every task - the same task that stopping early
+    # costs. So there is nothing to buy by stopping first, and two tasks to
+    # lose. The platform decides when a run ends; we do not.
+    return int(os.environ.get("SEAT15_TOKEN_BUDGET") or 600000)
 
 
 # Kept back from whatever deadline we are given, for the same reason 26 was

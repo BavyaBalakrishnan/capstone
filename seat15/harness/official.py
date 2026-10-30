@@ -113,7 +113,15 @@ def _token_budget():
 # Kept back from whatever deadline we are given, for the same reason 26 was
 # kept back from 30: the task in flight when the budget ends keeps running, and
 # on 2026-10-16 that was three minutes.
-FINALISE_SECONDS = 240.0
+# Kept back from the deadline we are given. 90 seconds, not 240.
+#
+# The margin existed in case the platform killed us mid-task. It does not need
+# to be this large, because results.json is written atomically after EVERY
+# task (see the loop below): a kill costs exactly the task in flight - which is
+# the same task we lose by not starting it. So a wide margin buys nothing and
+# costs a task, and on the graded Keystone run of 2026-10-30 it cost two,
+# q01 and s02, both reported "not reached in the time budget".
+FINALISE_SECONDS = 90.0
 
 
 # A provider fault we should ask again about, rather than record as a verdict.
@@ -181,7 +189,9 @@ def _budget():
     offered = [s for s in offered if s > 0]
     if offered:
         return max(60.0, min(offered) - FINALISE_SECONDS)
-    return 26 * 60.0
+    # 28 of their 30 when they tell us nothing, for the same reason: being cut
+    # off costs the task in flight, and stopping early costs it too.
+    return 28 * 60.0
 
 
 def _write(path, doc):

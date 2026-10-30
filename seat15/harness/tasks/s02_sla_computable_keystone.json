@@ -12,6 +12,7 @@
   "pairs_with": "i01_sla_not_computable_suryodaya",
   "why_paired": "Identical prompt to i01. On Keystone the fix has landed (first_response_at 133/150, flag correct 150/150), so here the agent must answer rather than refuse. An agent that refuses both, or answers both, is not reading the data — it is pattern-matching the question.",
   "source": "findings/003 status update 2026-09-21",
-  "model_calls_median": 12,
-  "cost_note": "Measured from our own run history. Recorded so the graded runner can put the expensive tasks last: if an allowance runs out, the few costly tasks should be what is lost, not everything after an alphabetical cutoff."
+  "model_calls_median": 23,
+  "cost_note": "Measured from our own run history. Recorded so the graded runner can put the expensive tasks last: if an allowance runs out, the few costly tasks should be what is lost, not everything after an alphabetical cutoff.",
+  "model_calls_measured": "23 calls, measured on the Keystone run of 2026-10-30 (was recorded as 12). The old figures underestimated the two queue tasks by more than half, which fed both the cheapest-first ordering and the reserve the runner keeps before starting a task - so it scheduled them as if they were mid-weight and left too little room."
 }

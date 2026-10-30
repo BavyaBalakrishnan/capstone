@@ -11,6 +11,7 @@
   "checks": "More than one ticket is worked; the counts close; every drafted reply cites a publishable, acceptably-rated article; and any ticket with no usable source is reported rather than quietly dropped.",
   "source": "held out - written by someone outside the agent's code",
   "why": "Every other task in this suite is phrased in the words our own code matches, because we wrote both sides. This one is not. On its first run both arms handled ONE ticket and stopped: the loop hid the queue tools unless the request used one of our phrases, and this person wrote 'new requests' and 'each one'. The model understood it fine - given the tools it walked the queue and drafted four replies. We had taken the capability away and read the result as a model failure. This task stays so that cannot happen again unnoticed.",
-  "model_calls_median": 10,
-  "cost_note": "Measured from our own run history. Recorded so the graded runner can put the expensive tasks last: if an allowance runs out, the few costly tasks should be what is lost, not everything after an alphabetical cutoff."
+  "model_calls_median": 9,
+  "cost_note": "Measured from our own run history. Recorded so the graded runner can put the expensive tasks last: if an allowance runs out, the few costly tasks should be what is lost, not everything after an alphabetical cutoff.",
+  "model_calls_measured": "9 calls, measured on the Keystone run of 2026-10-30 (was recorded as 10). The old figures underestimated the two queue tasks by more than half, which fed both the cheapest-first ordering and the reserve the runner keeps before starting a task - so it scheduled them as if they were mid-weight and left too little room."
 }

@@ -12,6 +12,7 @@
   "checks": "worked + not_worked equals the recounted queue; a subset requires a declared cap; every filed type and priority matches the row re-read at scoring time; every drafted reply cites only published+public articles that are not rated below half helpful over 10+ votes; the SLA half of the request is answered.",
   "source": "the seat's own assigned request, graded end to end",
   "why": "Every other task grades one slice. This is the whole job, and the only task whose prompt is the exact words the seat was given. Its correct answers differ by book: Keystone drafts most of its queue, Suryodaya can draft none of it.",
-  "model_calls_median": 10,
-  "cost_note": "Measured from our own run history. Recorded so the graded runner can put the expensive tasks last: if an allowance runs out, the few costly tasks should be what is lost, not everything after an alphabetical cutoff."
+  "model_calls_median": 26,
+  "cost_note": "Measured from our own run history. Recorded so the graded runner can put the expensive tasks last: if an allowance runs out, the few costly tasks should be what is lost, not everything after an alphabetical cutoff.",
+  "model_calls_measured": "26 calls, measured on the Keystone run of 2026-10-30 (was recorded as 10). The old figures underestimated the two queue tasks by more than half, which fed both the cheapest-first ordering and the reserve the runner keeps before starting a task - so it scheduled them as if they were mid-weight and left too little room."
 }

@@ -101,7 +101,7 @@ def _token_budget():
     300k one. A ceiling we cannot see is still a ceiling, so the runner keeps
     its own count and stops deliberately rather than being refused mid-task.
     """
-    # 290,000 against the platform's 300,000 a run.
+    # 300,000: the platform's own per-run cap, not a margin below it.
     #
     # It was 420,000 - above their cap - and unreachable anyway, because
     # health["tokens"] was never set so `spent` stayed 0 and this guard had
@@ -110,15 +110,16 @@ def _token_budget():
     # run: our own run of the same suite spends 195,319, but the platform's
     # model is more verbose - its Keystone run of 2026-10-21 reported 375,019.
     #
-    # So the margin sits just under their cap, for the same reason the time
-    # margin is now 90 seconds: being cut off costs the task in flight, which
-    # is the task stopping early costs too. Keeping back 30,000 tokens buys
-    # nothing and can cost a task.
+    # It now sits AT their cap, so this guard never stops a run the platform
+    # would have let continue. Any margin below the cap is a task we refuse to
+    # start that they would have allowed, and being cut off costs only the task
+    # in flight - the same task stopping early costs. The guard is a backstop
+    # against a runaway loop, not a budget of our own.
     #
     # If their model needs more than 300,000 for these 15 tasks, no ceiling
     # here will help and the per-task cost has to come down - q01 alone is 26
     # model calls.
-    return int(os.environ.get("SEAT15_TOKEN_BUDGET") or 290000)
+    return int(os.environ.get("SEAT15_TOKEN_BUDGET") or 300000)
 
 
 # Kept back from whatever deadline we are given, for the same reason 26 was

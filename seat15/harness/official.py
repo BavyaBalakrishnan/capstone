@@ -101,7 +101,13 @@ def _token_budget():
     300k one. A ceiling we cannot see is still a ceiling, so the runner keeps
     its own count and stops deliberately rather than being refused mid-task.
     """
-    return int(os.environ.get("SEAT15_TOKEN_BUDGET") or 420000)
+    # 270,000 against the platform's 300,000 a run, the same 10% margin the
+    # time budget keeps against the 30-minute cap.
+    #
+    # It was 420,000, which is ABOVE their cap - so even had the guard worked,
+    # it would have stopped us only after the platform had already cut us off.
+    # The graded Keystone run of 2026-10-21 reported 375,019 tokens.
+    return int(os.environ.get("SEAT15_TOKEN_BUDGET") or 270000)
 
 
 # Kept back from whatever deadline we are given, for the same reason 26 was

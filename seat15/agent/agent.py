@@ -1074,7 +1074,19 @@ class Agent(object):
                   "transport_failures": getattr(self.c, "transport_failures", 0),
                   "model_calls": len(getattr(self.policy, "stats", []) or []),
                   "unusable_replies": getattr(self.policy, "unusable", 0),
-                  "unusable_retries": getattr(self.policy, "unusable_retries", 0)}
+                  "unusable_retries": getattr(self.policy, "unusable_retries", 0),
+                  # Tokens this task actually spent, summed from the usage the
+                  # provider returns on every call.
+                  #
+                  # official.py has guarded a token budget since 2026-10-10 by
+                  # reading health["tokens"] - and nothing ever set it, so
+                  # `spent` stayed 0 and the guard has never once fired. The
+                  # numbers it was meant to catch are on the record: 299,813
+                  # tokens for 9 tasks on 2026-10-10, and 375,019 on the graded
+                  # Keystone run of 2026-10-21, against a platform cap of
+                  # 300,000 a run. The policy was already recording usage per
+                  # call in `stats`; only the sum was missing.
+                  "tokens": _tokens_used(self.policy)}
         return {"ended": ended if rec.get("recorded") else "finding_not_recorded",
                 "claimed_success": outcome == "answered",
                 "final_answer": summary, "outcome": outcome,
@@ -1519,6 +1531,15 @@ class LLMPolicy(object):
             time.sleep(5 * (attempt + 1))
         raise RuntimeError("model endpoint %s failed 4 times; last error: %s"
                            % (self.base, last))
+
+
+def _tokens_used(policy):
+    """Total tokens a policy's calls reported, 0 when the provider says nothing."""
+    total = 0
+    for s in getattr(policy, "stats", None) or []:
+        usage = s.get("usage") or {}
+        total += usage.get("total_tokens") or 0
+    return total
 
 
 def pin_llm_config():
